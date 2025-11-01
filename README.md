@@ -15,7 +15,7 @@ pyobj - Provides C++ support for some Python features
 ## 🚀 Features
 
 - ✅ Python in C++
-- ⚙️ init_python, exit_python, Str, List, Tuple, Set, type, fstring, json_loads, json_dumps, map, all, any, exec, eval, run_file, run_file_result
+- ⚙️ init_python, exit_python, Str, List, Tuple, Set, type, fstring, farg, json_loads, json_dumps, len, sorted, reversed, all, any, map, exec, eval, run_file, run_file_result
   
 <br>
 
@@ -25,7 +25,7 @@ pyobj - Provides C++ support for some Python features
 # Clone the repository
 git clone https://github.com/cppandpython/pyobj.git
 
-#Example
+#Example 1
 #include "pyobj.h"
 #include <iostream>
 using namespace py;
@@ -45,6 +45,21 @@ int main() {
     "y": "s",
     "z": 30
 }
+
+#Example 2
+#include "pyobj.h"
+#include <iostream>
+using namespace py;
+using namespace std;
+int main() {
+    init_python();
+    string text = fstring("hello {name}, what your mood {}", farg("name", "Alex"), Tuple({1,2,3}));  
+    print(text);
+    exit_python();
+    return 0;
+}
+#Result
+hello Alex, what your mood (1, 2, 3)
 ```
 
 
@@ -64,7 +79,7 @@ pyobj — Обеспечивает поддержку C++ для некотор�
 ## 🚀 Функции
 
 - ✅ Python в C++
-- ⚙️ init_python, exit_python, Str, List, Tuple, Set, type, fstring, json_loads, json_dumps, map, all, any, exec, eval, run_file, run_file_result
+- ⚙️ init_python, exit_python, Str, List, Tuple, Set, type, fstring, farg, json_loads, json_dumps, len, sorted, reversed, all, any, map, exec, eval, run_file, run_file_result
 
 <br>
 
@@ -74,7 +89,7 @@ pyobj — Обеспечивает поддержку C++ для некотор�
 # Клонировать репозиторий
 git clone https://github.com/cppandpython/pyobj.git
 
-#Пример
+#Пример 1
 #include "pyobj.h"
 #include <iostream>
 using namespace py;
@@ -87,11 +102,26 @@ pprint(d);
 py::exit_python();
 return 0;
 }
-#Результат
+#Результат 
 'dict'
 {
 "x": 10,
 "y": "s",
 "z": 30
 }
+
+#Пример 2
+#include "pyobj.h"
+#include <iostream>
+using namespace py;
+using namespace std;
+int main() {
+    init_python();
+    string text = fstring("hello {name}, what your mood {}", farg("name", "Alex"), Tuple({1,2,3}));  
+    print(text);
+    exit_python();
+    return 0;
+}
+#Результат 
+hello Alex, what your mood (1, 2, 3)
 ```
