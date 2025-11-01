@@ -1,3 +1,16 @@
+// CREATOR 
+// GitHub https://github.com/cppandpython
+// NAME: Vladislav 
+// SURNAME: Khudash  
+// AGE: 17
+
+// DATE: 01.11.2025
+// APP: PYTHON_IN_CPP
+// TYPE: LIB
+// VERSION: LATEST
+// PLATFORM: ANY
+
+
 #pragma once
 
 #include <Python.h>
