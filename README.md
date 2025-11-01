@@ -87,7 +87,7 @@ pprint(d);
 py::exit_python();
 return 0;
 }
-#Result
+#Результат
 'dict'
 {
 "x": 10,
