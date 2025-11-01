@@ -15,7 +15,7 @@ pyobj - Provides C++ support for some Python features
 ## 🚀 Features
 
 - ✅ Python in C++
-- ⚙️ Str, List, Tuple, Set, type, fstring, map, all, any, exec, eval, run_file, run_file_result
+- ⚙️ init_python, exit_python, Str, List, Tuple, Set, type, fstring, map, all, any, exec, eval, run_file, run_file_result
   
 <br>
 
@@ -23,7 +23,23 @@ pyobj - Provides C++ support for some Python features
 
 ```bash
 # Clone the repository
-git clone https://github.com/cppandpython/obfuscator.git
+git clone https://github.com/cppandpython/pyobj.git
+
+#Example
+#include "pyobj.h"
+#include <iostream>
+using namespace std;
+int main() {
+    py::init_python();
+    py::PyObj test = py::Dict({{"x", 10}, {"y", 20}, {"z", 30}});
+    cout << test;
+    cout << test["y"];
+    py::exit_python();
+    return 0;
+#Result
+
+}
+
 ```
 
 
