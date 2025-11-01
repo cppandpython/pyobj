@@ -28,18 +28,23 @@ git clone https://github.com/cppandpython/pyobj.git
 #Example
 #include "pyobj.h"
 #include <iostream>
+using namespace py;
 using namespace std;
 int main() {
     py::init_python();
-    py::PyObj test = py::Dict({{"x", 10}, {"y", 20}, {"z", 30}});
-    cout << test;
-    cout << test["y"];
+    Dict d = { {"x", 10}, {"y", "s"}, {"z", 30} };
+    print(type(d));
+    pprint(d);
     py::exit_python();
     return 0;
-#Result
-
 }
-
+#Result
+'dict'
+{
+    "x": 10,
+    "y": "s",
+    "z": 30
+}
 ```
 
 
