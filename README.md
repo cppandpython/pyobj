@@ -15,7 +15,7 @@ pyobj - Provides C++ support for some Python features
 ## 🚀 Features
 
 - ✅ Python in C++
-- ⚙️ init_python, exit_python, Str, List, Tuple, Set, type, fstring, map, all, any, exec, eval, run_file, run_file_result
+- ⚙️ init_python, exit_python, Str, List, Tuple, Set, type, fstring, json_loads, json_dumps, map, all, any, exec, eval, run_file, run_file_result
   
 <br>
 
