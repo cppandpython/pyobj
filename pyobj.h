@@ -1055,6 +1055,90 @@ public:
 };
 
 
+// ================== Formatted String ==================
+template<typename T>
+std::pair<std::string, std::string> farg(const std::string& name, T&& value) {
+    std::ostringstream os; 
+    os << value; 
+    return {name, os.str()};
+}
+
+
+template<typename... Args>
+std::string fstring(const std::string& format, Args&&... args) {
+    std::unordered_map<std::string, std::string> named_args;
+    std::vector<std::string> positional_args;
+    
+    auto process_arg = [&](auto&& arg) {
+        using ArgType = std::decay_t<decltype(arg)>;
+        
+        if constexpr (std::is_same_v<ArgType, std::pair<std::string, std::string>>) {
+            named_args.emplace(arg.first, arg.second);
+        } else {
+            std::ostringstream os; 
+            os << arg; 
+            positional_args.push_back(os.str());
+        }
+    };
+    
+    (process_arg(std::forward<Args>(args)), ...);
+    
+    std::string output;
+    output.reserve(format.size() + 32);
+    size_t position_index = 0;
+    
+    for (size_t i = 0; i < format.size(); ++i) {
+        if (format[i] == '{') {
+            // Handle escaped braces
+            if (i + 1 < format.size() && format[i + 1] == '{') {
+                output.push_back('{');
+                ++i;
+                continue;
+            }
+            
+            // Find closing brace
+            size_t j = format.find('}', i + 1);
+            if (j == std::string::npos) {
+                output.push_back('{');
+                continue;
+            }
+            
+            std::string key = format.substr(i + 1, j - i - 1);
+            
+            // Handle empty key (positional) or named key
+            if (key.empty()) {
+                if (position_index < positional_args.size()) {
+                    output += positional_args[position_index++];
+                } else {
+                    output += "{}";
+                }
+            } else {
+                auto it = named_args.find(key);
+                if (it != named_args.end()) {
+                    output += it->second;
+                } else {
+                    output += "{" + key + "}";
+                }
+            }
+            
+            i = j;
+        } else if (format[i] == '}') {
+            // Handle escaped braces
+            if (i + 1 < format.size() && format[i + 1] == '}') {
+                output.push_back('}');
+                ++i;
+            } else {
+                output.push_back('}');
+            }
+        } else {
+            output.push_back(format[i]);
+        }
+    }
+    
+    return output;
+}
+
+
 // ================== Pretty Print Implementation ==================
 namespace detail {
 
@@ -1241,120 +1325,7 @@ inline std::ostream& operator<<(std::ostream& os, const PyObj& obj) {
 }
 
 
-inline void PyObj::pretty_print(std::ostream& os, const PyObj& obj, int indent) { 
-    detail::pretty_print(os, obj, indent); 
-}
-
-
-inline void print(const PyObj& obj = PyObj("None")) {
-    if (obj.str() != "None")
-        std::cout << obj << std::endl;
-    else
-        std::cout << std::endl;
-}
-
-
-inline void pprint(const PyObj& obj, int indent = 0) {
-    PyObj::pretty_print(std::cout, obj, indent);
-    std::cout << std::endl;
-}
-
-
-// ================== Utility Functions ==================
-inline bool all(const List& list) { 
-    for (long i = 0; i < list.len(); ++i) 
-        if (!PyObject_IsTrue(list[i].get_obj())) 
-            return false; 
-    return true; 
-}
-
-
-inline bool any(const List& list) { 
-    for (long i = 0; i < list.len(); ++i) 
-        if (PyObject_IsTrue(list[i].get_obj())) 
-            return true; 
-    return false; 
-}
-
-
-inline List map(const PyObj& function, const List& list) { 
-    List output; 
-    for (long i = 0; i < list.len(); ++i) { 
-        PyObject* result = PyObject_CallFunctionObjArgs(function.get_obj(), list[i].get_obj(), nullptr); 
-        if (result) { 
-            PyList_Append(output.get_obj(), result); 
-            Py_XDECREF(result); 
-        } else {
-            PyErr_Clear();
-        }
-    } 
-    return output; 
-}
-
-
-inline void exec(const std::string& code) { 
-    PyRun_SimpleString(code.c_str()); 
-}
-
-
-inline PyObj eval(const std::string& code) { 
-    PyObject* globals = PyDict_New(); 
-    PyObject* locals = globals; 
-    PyObject* result = PyRun_String(code.c_str(), Py_eval_input, globals, locals); 
-    
-    if (!result) { 
-        PyErr_Print(); 
-        Py_XDECREF(globals); 
-        return PyObj(); 
-    } 
-    
-    Py_XDECREF(globals); 
-    return PyObj(result); 
-}
-
-
-inline void run_file(const std::string& filename) { 
-    FILE* file = fopen(filename.c_str(), "r"); 
-    if (!file) { 
-        std::cerr << "run_file: cannot open " << filename << "\n"; 
-        return;
-    } 
-    
-    PyRun_SimpleFile(file, filename.c_str()); 
-    fclose(file); 
-}
-
-
-inline Dict run_file_result(const std::string& filename) { 
-    FILE* file = fopen(filename.c_str(), "r"); 
-    if (!file) return Dict(); 
-    
-    PyObject* globals = PyDict_New(); 
-    PyObject* locals = globals; 
-    PyRun_File(file, filename.c_str(), Py_file_input, globals, locals); 
-    fclose(file); 
-    
-    Dict result;
-    PyObject *key, *value;
-    Py_ssize_t pos = 0;
-    
-    while (PyDict_Next(globals, &pos, &key, &value)) { 
-        if (!PyUnicode_Check(key)) continue; 
-        
-        const char* key_str = PyUnicode_AsUTF8(key); 
-        if (!key_str) continue; 
-        
-        std::string key_string(key_str); 
-        if (key_string.empty() || key_string == "__builtins__") continue; 
-        
-        result.add(PyObj(key), PyObj(value)); 
-    } 
-    
-    Py_XDECREF(globals); 
-    return result; 
-}
-
-
+// ================== Global Functions ==================
 inline Str type(const PyObj& obj) { 
     if (!obj.get_obj()) return Str("<NoneType>"); 
     
@@ -1374,91 +1345,6 @@ inline Str type(const PyObj& obj) {
 }
 
 
-// ================== Formatted String ==================
-template<typename T>
-std::pair<std::string, std::string> farg(const std::string& name, T&& value) {
-    std::ostringstream os; 
-    os << value; 
-    return {name, os.str()};
-}
-
-
-template<typename... Args>
-std::string fstring(const std::string& format, Args&&... args) {
-    std::unordered_map<std::string, std::string> named_args;
-    std::vector<std::string> positional_args;
-    
-    auto process_arg = [&](auto&& arg) {
-        using ArgType = std::decay_t<decltype(arg)>;
-        
-        if constexpr (std::is_same_v<ArgType, std::pair<std::string, std::string>>) {
-            named_args.emplace(arg.first, arg.second);
-        } else {
-            std::ostringstream os; 
-            os << arg; 
-            positional_args.push_back(os.str());
-        }
-    };
-    
-    (process_arg(std::forward<Args>(args)), ...);
-    
-    std::string output;
-    output.reserve(format.size() + 32);
-    size_t position_index = 0;
-    
-    for (size_t i = 0; i < format.size(); ++i) {
-        if (format[i] == '{') {
-            // Handle escaped braces
-            if (i + 1 < format.size() && format[i + 1] == '{') {
-                output.push_back('{');
-                ++i;
-                continue;
-            }
-            
-            // Find closing brace
-            size_t j = format.find('}', i + 1);
-            if (j == std::string::npos) {
-                output.push_back('{');
-                continue;
-            }
-            
-            std::string key = format.substr(i + 1, j - i - 1);
-            
-            // Handle empty key (positional) or named key
-            if (key.empty()) {
-                if (position_index < positional_args.size()) {
-                    output += positional_args[position_index++];
-                } else {
-                    output += "{}";
-                }
-            } else {
-                auto it = named_args.find(key);
-                if (it != named_args.end()) {
-                    output += it->second;
-                } else {
-                    output += "{" + key + "}";
-                }
-            }
-            
-            i = j;
-        } else if (format[i] == '}') {
-            // Handle escaped braces
-            if (i + 1 < format.size() && format[i + 1] == '}') {
-                output.push_back('}');
-                ++i;
-            } else {
-                output.push_back('}');
-            }
-        } else {
-            output.push_back(format[i]);
-        }
-    }
-    
-    return output;
-}
-
-
-// ================== Global Functions ==================
 inline long len(const PyObj& obj) {
     if (!obj.get_obj()) return 0;
     
@@ -1536,6 +1422,140 @@ inline PyObj reversed(const PyObj& obj) {
     
     PyErr_Clear();
     return PyObj();
+}
+
+
+inline void PyObj::pretty_print(std::ostream& os, const PyObj& obj, int indent) { 
+    detail::pretty_print(os, obj, indent); 
+}
+
+
+inline void print(const PyObj& obj = PyObj("None")) {
+    if (obj.str() != "None")
+        std::cout << obj << std::endl;
+    else
+        std::cout << std::endl;
+}
+
+
+inline void pprint(const PyObj& obj, int indent = 0) {
+    PyObj::pretty_print(std::cout, obj, indent);
+    std::cout << std::endl;
+}
+
+
+// ================== Utility Functions ==================
+inline bool all(const List& list) { 
+    for (long i = 0; i < list.len(); ++i) 
+        if (!PyObject_IsTrue(list[i].get_obj())) 
+            return false; 
+    return true; 
+}
+
+
+inline bool any(const List& list) { 
+    for (long i = 0; i < list.len(); ++i) 
+        if (PyObject_IsTrue(list[i].get_obj())) 
+            return true; 
+    return false; 
+}
+
+
+inline List map(const PyObj& function, const List& list) { 
+    List output; 
+    for (long i = 0; i < list.len(); ++i) { 
+        PyObject* result = PyObject_CallFunctionObjArgs(function.get_obj(), list[i].get_obj(), nullptr); 
+        if (result) { 
+            PyList_Append(output.get_obj(), result); 
+            Py_XDECREF(result); 
+        } else {
+            PyErr_Clear();
+        }
+    } 
+    return output; 
+}
+
+
+inline void exec(const std::string& code) { 
+    PyRun_SimpleString(code.c_str()); 
+}
+
+
+inline PyObj eval(const std::string& code) {
+    PyObject* globals = PyDict_New();
+    PyDict_SetItemString(globals, "__builtins__", PyEval_GetBuiltins()); 
+
+    PyObject* result = PyRun_String(code.c_str(), Py_file_input, globals, globals);
+
+    if (!result) {
+        PyErr_Print();
+        Py_XDECREF(globals);
+        return PyObj();
+    }
+
+    Py_XDECREF(result);
+
+    const char* system_keys[] = {
+        "__builtins__", 
+        "__name__", 
+        "__doc__",
+        "__package__", 
+        "__loader__", 
+        "__spec__", 
+        "__annotations__"
+    };
+
+    for (const char* key : system_keys) {
+        PyObject* pyKey = PyUnicode_FromString(key);
+        if (PyDict_Contains(globals, pyKey)) {
+            PyDict_DelItem(globals, pyKey);
+        }
+        Py_DECREF(pyKey); 
+    }
+
+    return PyObj(globals);
+}
+
+
+inline void run_file(const std::string& filename) { 
+    FILE* file = fopen(filename.c_str(), "r"); 
+    if (!file) { 
+        std::cerr << "run_file: cannot open " << filename << "\n"; 
+        return;
+    } 
+    
+    PyRun_SimpleFile(file, filename.c_str()); 
+    fclose(file); 
+}
+
+
+inline Dict run_file_result(const std::string& filename) { 
+    FILE* file = fopen(filename.c_str(), "r"); 
+    if (!file) return Dict(); 
+    
+    PyObject* globals = PyDict_New(); 
+    PyObject* locals = globals; 
+    PyRun_File(file, filename.c_str(), Py_file_input, globals, locals); 
+    fclose(file); 
+    
+    Dict result;
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
+    
+    while (PyDict_Next(globals, &pos, &key, &value)) { 
+        if (!PyUnicode_Check(key)) continue; 
+        
+        const char* key_str = PyUnicode_AsUTF8(key); 
+        if (!key_str) continue; 
+        
+        std::string key_string(key_str); 
+        if (key_string.empty() || key_string == "__builtins__") continue; 
+        
+        result.add(PyObj(key), PyObj(value)); 
+    } 
+    
+    Py_XDECREF(globals); 
+    return result; 
 }
 
 
@@ -1664,4 +1684,4 @@ inline PyObj json_loads(const Str& json_string) {
 }
 
 
-} // namespace py
+} // end namespace py
