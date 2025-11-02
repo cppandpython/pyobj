@@ -4,7 +4,7 @@
 // SURNAME: Khudash  
 // AGE: 17
 
-// DATE: 01.11.2025
+// DATE: 02.11.2025
 // APP: PYTHON_IN_CPP
 // TYPE: LIB
 // VERSION: LATEST
@@ -12,6 +12,7 @@
 
 
 #pragma once
+
 
 #include <Python.h>
 #include <string>
@@ -25,20 +26,40 @@
 namespace py {
 
 
-// ================== Python init ==================
-inline void init_python() { if (!Py_IsInitialized()) Py_Initialize(); }
-inline void exit_python() { if (Py_IsInitialized()) Py_FinalizeEx(); }
+// ================== Python Initialization ==================
+inline void init_python() { 
+    if (!Py_IsInitialized()) Py_Initialize(); 
+}
 
-// ================== Base PyObj ==================
+
+inline void exit_python() { 
+    if (Py_IsInitialized()) Py_FinalizeEx(); 
+}
+
+
+// ================== Base PyObj Class ==================
 class PyObj {
+
+
 protected:
     PyObject* obj;
 
+
 public:
+    // Constructors
     PyObj(PyObject* o = nullptr) : obj(o) { Py_XINCREF(obj); }
     PyObj(const PyObj& other) : obj(other.obj) { Py_XINCREF(obj); }
     PyObj(PyObj&& other) noexcept : obj(other.obj) { other.obj = nullptr; }
+    
+    // Type conversion constructors
+    PyObj(int v) : obj(PyLong_FromLong(v)) {}
+    PyObj(long v) : obj(PyLong_FromLong(v)) {}
+    PyObj(double v) : obj(PyFloat_FromDouble(v)) {}
+    PyObj(bool v) : obj(v ? Py_True : Py_False) { Py_XINCREF(obj); }
+    PyObj(const std::string& s) : obj(PyUnicode_FromString(s.c_str())) {}
+    PyObj(const char* s) : obj(PyUnicode_FromString(s)) {}
 
+    // Assignment operators
     PyObj& operator=(const PyObj& other) {
         if (this != &other) {
             Py_XDECREF(obj);
@@ -57,16 +78,12 @@ public:
         return *this;
     }
 
-    PyObj(int v) : obj(PyLong_FromLong(v)) {}
-    PyObj(long v) : obj(PyLong_FromLong(v)) {}
-    PyObj(double v) : obj(PyFloat_FromDouble(v)) {}
-    PyObj(bool v) : obj(v ? Py_True : Py_False) { Py_XINCREF(obj); }
-    PyObj(const std::string& s) : obj(PyUnicode_FromString(s.c_str())) {}
-    PyObj(const char* s) : obj(PyUnicode_FromString(s)) {}
-
     virtual ~PyObj() { Py_XDECREF(obj); }
+    
+    // Getters
     PyObject* get_obj() const { return obj; }
 
+    // Type checking methods
     bool is_empty() const {
         if (!obj) return true;
         if (PyUnicode_Check(obj)) return PyUnicode_GetLength(obj) == 0;
@@ -83,402 +100,1568 @@ public:
     bool is_set() const { return obj && PySet_Check(obj); }
     bool is_sequence() const { return is_list() || is_tuple() || is_str(); }
 
+    // Item access methods
     PyObj get_item(const PyObj& key) const {
         if (!obj) return PyObj();
-        PyObject* r = PyDict_Check(obj) ? PyDict_GetItem(obj, key.get_obj())
-                                        : PyObject_GetItem(obj, key.get_obj());
-        if (!r) { PyErr_Clear(); return PyObj(); }
-        Py_XINCREF(r);
-        return PyObj(r);
+        
+        PyObject* result = PyDict_Check(obj) 
+            ? PyDict_GetItem(obj, key.get_obj())
+            : PyObject_GetItem(obj, key.get_obj());
+            
+        if (!result) { 
+            PyErr_Clear(); 
+            return PyObj(); 
+        }
+        
+        Py_XINCREF(result);
+        return PyObj(result);
     }
 
     PyObj get_item(long index) const {
         if (!obj) return PyObj();
 
+        // Handle lists and tuples
         if (PyList_Check(obj) || PyTuple_Check(obj)) {
-            Py_ssize_t n = PyList_Check(obj) ? PyList_Size(obj) : PyTuple_Size(obj);
-            if (index < 0) index += n;
-            if (index < 0 || index >= n) return PyObj();
-            PyObject* it = PyList_Check(obj) ? PyList_GetItem(obj, index) : PyTuple_GetItem(obj, index);
-            Py_XINCREF(it);
-            return PyObj(it);
+            Py_ssize_t size = PyList_Check(obj) 
+                ? PyList_Size(obj) 
+                : PyTuple_Size(obj);
+                
+            if (index < 0) index += size;
+            if (index < 0 || index >= size) return PyObj();
+            
+            PyObject* item = PyList_Check(obj) 
+                ? PyList_GetItem(obj, index) 
+                : PyTuple_GetItem(obj, index);
+                
+            Py_XINCREF(item);
+            return PyObj(item);
         }
 
+        // Handle strings
         if (PyUnicode_Check(obj)) {
-            Py_ssize_t n = PyUnicode_GetLength(obj);
-            if (index < 0) index += n;
-            if (index < 0 || index >= n) return PyObj();
-            Py_UCS4 ch = PyUnicode_ReadChar(obj, index);
-            PyObject* tmp = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, &ch, 1);
-            PyObj r(tmp); Py_XDECREF(tmp); return r;
+            Py_ssize_t length = PyUnicode_GetLength(obj);
+            if (index < 0) index += length;
+            if (index < 0 || index >= length) return PyObj();
+            
+            Py_UCS4 character = PyUnicode_ReadChar(obj, index);
+            PyObject* temp = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, &character, 1);
+            PyObj result(temp); 
+            Py_XDECREF(temp); 
+            return result;
         }
 
-        PyObject* pyidx = PyLong_FromLong(index);
-        PyObject* r = PyObject_GetItem(obj, pyidx);
-        Py_XDECREF(pyidx);
-        if (!r) { PyErr_Clear(); return PyObj(); }
-        Py_XINCREF(r);
-        return PyObj(r);
+        // Generic case
+        PyObject* py_index = PyLong_FromLong(index);
+        PyObject* result = PyObject_GetItem(obj, py_index);
+        Py_XDECREF(py_index);
+        
+        if (!result) { 
+            PyErr_Clear(); 
+            return PyObj(); 
+        }
+        
+        Py_XINCREF(result);
+        return PyObj(result);
     }
 
+    // Operator overloads for item access
     PyObj operator[](const PyObj& key) const { return get_item(key); }
     PyObj operator[](long index) const { return get_item(index); }
 
-    bool set_item(const PyObj& key, const PyObj& val) {
+    // Item setting methods
+    bool set_item(const PyObj& key, const PyObj& value) {
         if (!obj) return false;
-        return PyDict_Check(obj) ? PyDict_SetItem(obj, key.get_obj(), val.get_obj()) == 0
-                                 : PyObject_SetItem(obj, key.get_obj(), val.get_obj()) == 0;
+        
+        return PyDict_Check(obj) 
+            ? PyDict_SetItem(obj, key.get_obj(), value.get_obj()) == 0
+            : PyObject_SetItem(obj, key.get_obj(), value.get_obj()) == 0;
     }
 
-    bool set_item(long index, const PyObj& val) {
+    bool set_item(long index, const PyObj& value) {
         if (!obj) return false;
+        
         if (PyList_Check(obj)) {
-            Py_ssize_t n = PyList_Size(obj); if (index < 0) index += n;
-            if (index < 0 || index >= n) return false;
-            Py_XINCREF(val.get_obj());
-            return PyList_SetItem(obj, index, val.get_obj()) == 0;
+            Py_ssize_t size = PyList_Size(obj); 
+            if (index < 0) index += size;
+            if (index < 0 || index >= size) return false;
+            
+            Py_XINCREF(value.get_obj());
+            return PyList_SetItem(obj, index, value.get_obj()) == 0;
         }
-        PyObject* pyidx = PyLong_FromLong(index);
-        int ok = PyObject_SetItem(obj, pyidx, val.get_obj());
-        Py_XDECREF(pyidx);
-        return ok == 0;
+        
+        PyObject* py_index = PyLong_FromLong(index);
+        int success = PyObject_SetItem(obj, py_index, value.get_obj());
+        Py_XDECREF(py_index);
+        
+        return success == 0;
     }
 
+    // String representation
     std::string str() const {
         if (!obj) return "None";
-        PyObject* r = PyObject_Str(obj);
-        if (!r) { PyErr_Clear(); return "<error>"; }
-        const char* c = PyUnicode_AsUTF8(r);
-        std::string s = c ? c : "";
-        Py_XDECREF(r);
-        return s;
+        
+        PyObject* string_obj = PyObject_Str(obj);
+        if (!string_obj) { 
+            PyErr_Clear(); 
+            return "<error>"; 
+        }
+        
+        const char* c_str = PyUnicode_AsUTF8(string_obj);
+        std::string result = c_str ? c_str : "";
+        Py_XDECREF(string_obj);
+        
+        return result;
     }
 
+    // Pretty printing
     static void pretty_print(std::ostream& os, const PyObj& obj, int indent = 0);
 };
 
-// ================== Str ==================
+
+// ================== String Class ==================
 class Str : public PyObj {
+
+
 public:
+    // Constructors
     Str() : PyObj("") {}
     Str(const std::string& s) : PyObj(s) {}
     Str(const char* s) : PyObj(s) {}
     Str(PyObject* o) : PyObj(o) {}
     Str(const PyObj& o) : PyObj(o.get_obj()) {}
 
-    // Basic string methods
-    Str capitalize() const { PyObject* r = PyObject_CallMethod(obj,(char*)"capitalize",nullptr); return Str(r); }
-    Str upper() const { PyObject* r = PyObject_CallMethod(obj,(char*)"upper",nullptr); return Str(r); }
-    Str lower() const { PyObject* r = PyObject_CallMethod(obj,(char*)"lower",nullptr); return Str(r); }
-    Str title() const { PyObject* r = PyObject_CallMethod(obj,(char*)"title",nullptr); return Str(r); }
-    Str swapcase() const { PyObject* r = PyObject_CallMethod(obj,(char*)"swapcase",nullptr); return Str(r); }
-    Str strip() const { PyObject* r = PyObject_CallMethod(obj,(char*)"strip",nullptr); return Str(r); }
-    Str lstrip() const { PyObject* r = PyObject_CallMethod(obj,(char*)"lstrip",nullptr); return Str(r); }
-    Str rstrip() const { PyObject* r = PyObject_CallMethod(obj,(char*)"rstrip",nullptr); return Str(r); }
-
-    // Checks
-    bool isdigit() const { PyObject* r = PyObject_CallMethod(obj,(char*)"isdigit",nullptr); bool b = r && PyObject_IsTrue(r); Py_XDECREF(r); return b; }
-    bool isalpha() const { PyObject* r = PyObject_CallMethod(obj,(char*)"isalpha",nullptr); bool b = r && PyObject_IsTrue(r); Py_XDECREF(r); return b; }
-    bool isalnum() const { PyObject* r = PyObject_CallMethod(obj,(char*)"isalnum",nullptr); bool b = r && PyObject_IsTrue(r); Py_XDECREF(r); return b; }
-    bool isdecimal() const { PyObject* r = PyObject_CallMethod(obj,(char*)"isdecimal",nullptr); bool b = r && PyObject_IsTrue(r); Py_XDECREF(r); return b; }
-    bool isnumeric() const { PyObject* r = PyObject_CallMethod(obj,(char*)"isnumeric",nullptr); bool b = r && PyObject_IsTrue(r); Py_XDECREF(r); return b; }
-    bool istitle() const { PyObject* r = PyObject_CallMethod(obj,(char*)"istitle",nullptr); bool b = r && PyObject_IsTrue(r); Py_XDECREF(r); return b; }
-    bool isupper() const { PyObject* r = PyObject_CallMethod(obj,(char*)"isupper",nullptr); bool b = r && PyObject_IsTrue(r); Py_XDECREF(r); return b; }
-    bool islower() const { PyObject* r = PyObject_CallMethod(obj,(char*)"islower",nullptr); bool b = r && PyObject_IsTrue(r); Py_XDECREF(r); return b; }
-
-    // Search / replace
-    long find(const Str& s) const { PyObject* r = PyObject_CallMethod(obj,(char*)"find",(char*)"O",s.get_obj()); long v = r ? PyLong_AsLong(r) : -1; Py_XDECREF(r); return v; }
-    long rfind(const Str& s) const { PyObject* r = PyObject_CallMethod(obj,(char*)"rfind",(char*)"O",s.get_obj()); long v = r ? PyLong_AsLong(r) : -1; Py_XDECREF(r); return v; }
-    long index(const Str& s) const { PyObject* r = PyObject_CallMethod(obj,(char*)"index",(char*)"O",s.get_obj()); long v = r ? PyLong_AsLong(r) : -1; Py_XDECREF(r); return v; }
-    long rindex(const Str& s) const { PyObject* r = PyObject_CallMethod(obj,(char*)"rindex",(char*)"O",s.get_obj()); long v = r ? PyLong_AsLong(r) : -1; Py_XDECREF(r); return v; }
-    Str replace(const Str& old_s,const Str& new_s) const { PyObject* r = PyObject_CallMethod(obj,(char*)"replace",(char*)"OO",old_s.get_obj(),new_s.get_obj()); return Str(r); }
-    std::vector<Str> split(const Str& sep="") const {
-        PyObject* r = sep.str().empty() ? PyObject_CallMethod(obj,(char*)"split",nullptr) : PyObject_CallMethod(obj,(char*)"split",(char*)"O",sep.get_obj());
-        std::vector<Str> out;
-        if(!r){ PyErr_Clear(); return out; }
-        if(PyList_Check(r)){
-            Py_ssize_t n = PyList_Size(r);
-            for(Py_ssize_t i=0;i<n;++i){ PyObject* it = PyList_GetItem(r,i); Py_XINCREF(it); out.push_back(Str(it)); }
-        }
-        Py_XDECREF(r); return out;
-    }
-    Str join(const std::vector<Str>& seq) const {
-        PyObject* list_obj = PyList_New(seq.size());
-        for(Py_ssize_t i=0;i<seq.size();++i){ Py_XINCREF(seq[i].get_obj()); PyList_SetItem(list_obj,i,seq[i].get_obj()); }
-        PyObject* r = PyObject_CallMethod(obj,(char*)"join",(char*)"O",list_obj); Py_XDECREF(list_obj);
-        return Str(r);
-    }
-
-    long len() const { return obj ? PyUnicode_GetLength(obj) : 0; }
-    Str operator[](long index) const {
-        Py_ssize_t n = len(); if(index < 0) index += n; if(index < 0 || index >= n) return Str();
-        Py_UCS4 ch = PyUnicode_ReadChar(obj,index);
-        PyObject* tmp = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND,&ch,1);
-        Str r(tmp); Py_XDECREF(tmp); return r;
-    }
-};
-
-// ================== List ==================
-class List : public PyObj {
-public:
-    List() : PyObj(PyList_New(0)) {}
-    List(const std::initializer_list<PyObj>& l) : PyObj(PyList_New(l.size())) {
-        size_t i=0; for(const auto& v:l){ Py_XINCREF(v.get_obj()); PyList_SetItem(obj,i++,v.get_obj()); }
-    }
-
-    void append(const PyObj& val){ PyList_Append(obj,val.get_obj()); }
-    void extend(const List& l){ PyObject* r=PyObject_CallMethod(obj,(char*)"extend",(char*)"O",l.get_obj()); Py_XDECREF(r); }
-    void insert(long index,const PyObj& val){ PyObject* r=PyObject_CallMethod(obj,(char*)"insert",(char*)"lO",index,val.get_obj()); Py_XDECREF(r); }
-    void remove(const PyObj& val){ PyObject* r=PyObject_CallMethod(obj,(char*)"remove",(char*)"O",val.get_obj()); Py_XDECREF(r); }
-    PyObj pop(int index=-1){
-        Py_ssize_t n=PyList_Size(obj); if(index<0) index+=n;
-        if(index<0||index>=n) return PyObj();
-        PyObject* it=PyList_GetItem(obj,index); Py_XINCREF(it);
-        PySequence_DelItem(obj,index); return PyObj(it);
-    }
-    long index(const PyObj& val) const { PyObject* r=PyObject_CallMethod(obj,(char*)"index",(char*)"O",val.get_obj()); long v = r ? PyLong_AsLong(r) : -1; Py_XDECREF(r); return v; }
-    long count(const PyObj& val) const { PyObject* r=PyObject_CallMethod(obj,(char*)"count",(char*)"O",val.get_obj()); long v = r ? PyLong_AsLong(r) : 0; Py_XDECREF(r); return v; }
-    void reverse(){ PyObject* r=PyObject_CallMethod(obj,(char*)"reverse",nullptr); Py_XDECREF(r); }
-    void sort(){ PyObject* r=PyObject_CallMethod(obj,(char*)"sort",nullptr); Py_XDECREF(r); }
-
-    long len() const { return obj ? PyList_Size(obj) : 0; }
-    PyObj operator[](long index) const {
-        Py_ssize_t n=PyList_Size(obj); if(index<0) index+=n; if(index<0||index>=n) return PyObj();
-        PyObject* it = PyList_GetItem(obj,index); Py_XINCREF(it); return PyObj(it);
-    }
-    bool set(long index,const PyObj& val){ return set_item(index,val); }
-};
-
-// ================== Tuple ==================
-class Tuple : public PyObj {
-public:
-    Tuple() : PyObj(PyTuple_New(0)) {}
-    Tuple(PyObject* o) : PyObj(o) {}          
-    Tuple(const std::initializer_list<PyObj>& l){
-        PyObject* list = PyList_New(l.size());
-        size_t i = 0;
-        for (auto& v : l) {
-            Py_XINCREF(v.get_obj());                
-            PyList_SetItem(list, i++, v.get_obj()); 
-        }
-        obj = PySequence_Tuple(list); 
-        Py_XDECREF(list);            
+    // String manipulation methods
+    Str capitalize() const { 
+        PyObject* result = PyObject_CallMethod(obj, "capitalize", nullptr); 
+        return Str(result); 
     }
     
+    Str upper() const { 
+        PyObject* result = PyObject_CallMethod(obj, "upper", nullptr); 
+        return Str(result); 
+    }
+    
+    Str lower() const { 
+        PyObject* result = PyObject_CallMethod(obj, "lower", nullptr); 
+        return Str(result); 
+    }
+    
+    Str title() const { 
+        PyObject* result = PyObject_CallMethod(obj, "title", nullptr); 
+        return Str(result); 
+    }
+    
+    Str swapcase() const { 
+        PyObject* result = PyObject_CallMethod(obj, "swapcase", nullptr); 
+        return Str(result); 
+    }
+    
+    Str strip() const { 
+        PyObject* result = PyObject_CallMethod(obj, "strip", nullptr); 
+        return Str(result); 
+    }
+    
+    Str lstrip() const { 
+        PyObject* result = PyObject_CallMethod(obj, "lstrip", nullptr); 
+        return Str(result); 
+    }
+    
+    Str rstrip() const { 
+        PyObject* result = PyObject_CallMethod(obj, "rstrip", nullptr); 
+        return Str(result); 
+    }
+
+    // String validation methods
+    bool isdigit() const { 
+        PyObject* result = PyObject_CallMethod(obj, "isdigit", nullptr); 
+        bool value = result && PyObject_IsTrue(result); 
+        Py_XDECREF(result); 
+        return value; 
+    }
+    
+    bool isalpha() const { 
+        PyObject* result = PyObject_CallMethod(obj, "isalpha", nullptr); 
+        bool value = result && PyObject_IsTrue(result); 
+        Py_XDECREF(result); 
+        return value; 
+    }
+    
+    bool isalnum() const { 
+        PyObject* result = PyObject_CallMethod(obj, "isalnum", nullptr); 
+        bool value = result && PyObject_IsTrue(result); 
+        Py_XDECREF(result); 
+        return value; 
+    }
+    
+    bool isdecimal() const { 
+        PyObject* result = PyObject_CallMethod(obj, "isdecimal", nullptr); 
+        bool value = result && PyObject_IsTrue(result); 
+        Py_XDECREF(result); 
+        return value; 
+    }
+    
+    bool isnumeric() const { 
+        PyObject* result = PyObject_CallMethod(obj, "isnumeric", nullptr); 
+        bool value = result && PyObject_IsTrue(result); 
+        Py_XDECREF(result); 
+        return value; 
+    }
+    
+    bool istitle() const { 
+        PyObject* result = PyObject_CallMethod(obj, "istitle", nullptr); 
+        bool value = result && PyObject_IsTrue(result); 
+        Py_XDECREF(result); 
+        return value; 
+    }
+    
+    bool isupper() const { 
+        PyObject* result = PyObject_CallMethod(obj, "isupper", nullptr); 
+        bool value = result && PyObject_IsTrue(result); 
+        Py_XDECREF(result); 
+        return value; 
+    }
+    
+    bool islower() const { 
+        PyObject* result = PyObject_CallMethod(obj, "islower", nullptr); 
+        bool value = result && PyObject_IsTrue(result); 
+        Py_XDECREF(result); 
+        return value; 
+    }
+
+    // Search methods
+    long find(const Str& substring) const { 
+        PyObject* result = PyObject_CallMethod(obj, "find", "O", substring.get_obj()); 
+        long value = result ? PyLong_AsLong(result) : -1; 
+        Py_XDECREF(result); 
+        return value; 
+    }
+    
+    long rfind(const Str& substring) const { 
+        PyObject* result = PyObject_CallMethod(obj, "rfind", "O", substring.get_obj()); 
+        long value = result ? PyLong_AsLong(result) : -1; 
+        Py_XDECREF(result); 
+        return value; 
+    }
+    
+    long index(const Str& substring) const { 
+        PyObject* result = PyObject_CallMethod(obj, "index", "O", substring.get_obj()); 
+        long value = result ? PyLong_AsLong(result) : -1; 
+        Py_XDECREF(result); 
+        return value; 
+    }
+    
+    long rindex(const Str& substring) const { 
+        PyObject* result = PyObject_CallMethod(obj, "rindex", "O", substring.get_obj()); 
+        long value = result ? PyLong_AsLong(result) : -1; 
+        Py_XDECREF(result); 
+        return value; 
+    }
+    
+    Str replace(const Str& old_str, const Str& new_str) const { 
+        PyObject* result = PyObject_CallMethod(obj, "replace", "OO", old_str.get_obj(), new_str.get_obj()); 
+        return Str(result); 
+    }
+
+    // Split and join methods
+    std::vector<Str> split(const Str& separator = "") const {
+        PyObject* result = separator.str().empty() 
+            ? PyObject_CallMethod(obj, "split", nullptr) 
+            : PyObject_CallMethod(obj, "split", "O", separator.get_obj());
+            
+        std::vector<Str> output;
+        if (!result) { 
+            PyErr_Clear(); 
+            return output; 
+        }
+        
+        if (PyList_Check(result)) {
+            Py_ssize_t size = PyList_Size(result);
+            for (Py_ssize_t i = 0; i < size; ++i) {
+                PyObject* item = PyList_GetItem(result, i); 
+                Py_XINCREF(item); 
+                output.push_back(Str(item)); 
+            }
+        }
+        
+        Py_XDECREF(result);
+        return output;
+    }
+
+    Str join(const std::vector<Str>& sequence) const {
+        PyObject* list_obj = PyList_New(sequence.size());
+        for (Py_ssize_t i = 0; i < sequence.size(); ++i) {
+            Py_XINCREF(sequence[i].get_obj()); 
+            PyList_SetItem(list_obj, i, sequence[i].get_obj()); 
+        }
+        
+        PyObject* result = PyObject_CallMethod(obj, "join", "O", list_obj);
+        Py_XDECREF(list_obj);
+        
+        return Str(result);
+    }
+
+    // Length and indexing
+    long len() const { return obj ? PyUnicode_GetLength(obj) : 0; }
+
+    Str operator[](long index) const {
+        Py_ssize_t length = len(); 
+        if (index < 0) index += length; 
+        if (index < 0 || index >= length) return Str();
+        
+        Py_UCS4 character = PyUnicode_ReadChar(obj, index);
+        PyObject* temp = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, &character, 1);
+        Str result(temp); 
+        Py_XDECREF(temp); 
+        return result;
+    }
+
+    // String concatenation and repetition
+    Str operator+(const Str& other) const {
+        PyObject* result = PyUnicode_Concat(obj, other.get_obj());
+        return Str(result);
+    }
+
+    Str& operator+=(const Str& other) {
+        PyObject* result = PyUnicode_Concat(obj, other.get_obj());
+        if (result) { 
+            Py_XDECREF(obj); 
+            obj = result; 
+        }
+        return *this;
+    }
+
+    Str operator*(long n) const {
+        PyObject* result = PySequence_Repeat(obj, n);
+        return Str(result);
+    }
+
+    Str& operator*=(long n) {
+        PyObject* result = PySequence_Repeat(obj, n);
+        if (result) { 
+            Py_XDECREF(obj); 
+            obj = result; 
+        }
+        return *this;
+    }
+
+    // Comparison operators
+    bool operator==(const Str& other) const { 
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_EQ) == 1; 
+    }
+    
+    bool operator!=(const Str& other) const { 
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_NE) == 1; 
+    }
+    
+    bool operator<(const Str& other) const { 
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_LT) == 1; 
+    }
+    
+    bool operator>(const Str& other) const { 
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_GT) == 1; 
+    }
+    
+    bool operator<=(const Str& other) const { 
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_LE) == 1; 
+    }
+    
+    bool operator>=(const Str& other) const { 
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_GE) == 1; 
+    }
+
+    // Contains check
+    bool contains(const Str& substring) const { 
+        int result = PySequence_Contains(obj, substring.get_obj()); 
+        return result == 1; 
+    }
+
+    // String representation
+    std::string str() const {
+        if (!obj) return "None";
+        
+        PyObject* string_obj = PyObject_Str(obj);
+        std::string result = PyUnicode_AsUTF8(string_obj);
+        Py_XDECREF(string_obj);
+        
+        return result;
+    }
+};
+
+
+// ================== List Class ==================
+class List : public PyObj {
+
+
+public:
+    List() : PyObj(PyList_New(0)) {}
+    explicit List(PyObject* o) : PyObj(o) {}
+    
+    List(const std::initializer_list<PyObj>& elements)
+        : PyObj(PyList_New(elements.size())) {
+        size_t index = 0;
+        for (const auto& value : elements) {
+            Py_XINCREF(value.get_obj());
+            PyList_SetItem(obj, index++, value.get_obj());
+        }
+    }
+
+    // List manipulation methods
+    void append(const PyObj& value) { 
+        PyList_Append(obj, value.get_obj()); 
+    }
+    
+    void extend(const List& other) {
+        PyObject* result = PyObject_CallMethod(obj, "extend", "O", other.get_obj());
+        Py_XDECREF(result);
+    }
+    
+    void insert(long index, const PyObj& value) {
+        PyObject* result = PyObject_CallMethod(obj, "insert", "lO", index, value.get_obj());
+        Py_XDECREF(result);
+    }
+    
+    void remove(const PyObj& value) {
+        PyObject* result = PyObject_CallMethod(obj, "remove", "O", value.get_obj());
+        Py_XDECREF(result);
+    }
+    
+    PyObj pop(int index = -1) {
+        Py_ssize_t size = PyList_Size(obj);
+        if (index < 0) index += size;
+        if (index < 0 || index >= size) return PyObj();
+        
+        PyObject* item = PyList_GetItem(obj, index);
+        Py_XINCREF(item);
+        PySequence_DelItem(obj, index);
+        
+        return PyObj(item);
+    }
+    
+    void clear() {
+        PyObject* result = PyObject_CallMethod(obj, "clear", nullptr);
+        Py_XDECREF(result);
+    }
+    
+    long index(const PyObj& value) const {
+        PyObject* result = PyObject_CallMethod(obj, "index", "O", value.get_obj());
+        long index_value = result ? PyLong_AsLong(result) : -1;
+        Py_XDECREF(result);
+        
+        return index_value;
+    }
+    
+    long count(const PyObj& value) const {
+        PyObject* result = PyObject_CallMethod(obj, "count", "O", value.get_obj());
+        long count_value = result ? PyLong_AsLong(result) : 0;
+        Py_XDECREF(result);
+        
+        return count_value;
+    }
+    
+    void reverse() {
+        PyObject* result = PyObject_CallMethod(obj, "reverse", nullptr);
+        Py_XDECREF(result);
+    }
+    
+    void sort() {
+        PyObject* result = PyObject_CallMethod(obj, "sort", nullptr);
+        Py_XDECREF(result);
+    }
+
+    // Length and contains
+    long len() const { return obj ? PyList_Size(obj) : 0; }
+
+    bool contains(const PyObj& value) const {
+        if (!obj) return false;
+        
+        int result = PySequence_Contains(obj, value.get_obj());
+        if (result == -1) { 
+            PyErr_Clear(); 
+            return false; 
+        }
+        
+        return result == 1;
+    }
+
+    // Indexing
+    PyObj operator[](long index) const {
+        Py_ssize_t size = PyList_Size(obj);
+        if (index < 0) index += size;
+        if (index < 0 || index >= size) return PyObj();
+        
+        PyObject* item = PyList_GetItem(obj, index);
+        Py_XINCREF(item);
+        
+        return PyObj(item);
+    }
+
+    bool set(long index, const PyObj& value) {
+        return PyList_SetItem(obj, index, value.get_obj()) == 0;
+    }
+
+    // List operations
+    List operator+(const List& other) const {
+        if (!obj || !other.get_obj()) return List();
+        
+        PyObject* result = PySequence_Concat(obj, other.get_obj());
+        return List(result);
+    }
+
+    List& operator+=(const List& other) {
+        extend(other);
+        return *this;
+    }
+
+    List operator*(long n) const {
+        if (!obj) return List();
+        
+        PyObject* result = PySequence_Repeat(obj, n);
+        return List(result);
+    }
+
+    List& operator*=(long n) {
+        PyObject* result = PySequence_Repeat(obj, n);
+        if (result) {
+            Py_XDECREF(obj);
+            obj = result;
+        }
+        return *this;
+    }
+
+    // Comparison operators
+    bool operator==(const List& other) const {
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_EQ) == 1;
+    }
+    
+    bool operator!=(const List& other) const {
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_NE) == 1;
+    }
+    
+    bool operator<(const List& other) const {
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_LT) == 1;
+    }
+    
+    bool operator<=(const List& other) const {
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_LE) == 1;
+    }
+    
+    bool operator>(const List& other) const {
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_GT) == 1;
+    }
+    
+    bool operator>=(const List& other) const {
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_GE) == 1;
+    }
+
+    // String representation
+    std::string str() const {
+        if (!obj) return "None";
+        
+        PyObject* string_obj = PyObject_Str(obj);
+        std::string result = PyUnicode_AsUTF8(string_obj);
+        Py_XDECREF(string_obj);
+        
+        return result;
+    }
+};
+
+
+// ================== Tuple Class ==================
+class Tuple : public PyObj {
+
+
+public:
+    Tuple() : PyObj(PyTuple_New(0)) {}
+    explicit Tuple(PyObject* o) : PyObj(o) {}
+    
+    Tuple(const std::initializer_list<PyObj>& elements) {
+        PyObject* tuple = PyTuple_New(elements.size());
+        size_t index = 0;
+        for (auto& value : elements) {
+            Py_XINCREF(value.get_obj());
+            PyTuple_SetItem(tuple, index++, value.get_obj());
+        }
+        obj = tuple;
+    }
+
+    // Basic operations
     long len() const { return obj ? PyTuple_Size(obj) : 0; }
 
     PyObj operator[](long index) const {
         if (!obj) return PyObj();
-        Py_ssize_t n = PyTuple_Size(obj);
-        if (index < 0) index += n;
-        if (index < 0 || index >= n) return PyObj();
-        PyObject* it = PyTuple_GetItem(obj, index);
-        Py_XINCREF(it); 
-        return PyObj(it);
+        
+        Py_ssize_t size = PyTuple_Size(obj);
+        if (index < 0) index += size;
+        if (index < 0 || index >= size) return PyObj();
+        
+        PyObject* item = PyTuple_GetItem(obj, index);
+        Py_XINCREF(item);
+        
+        return PyObj(item);
     }
 
-    long index(const PyObj& val) const {
+    long index(const PyObj& value) const {
         if (!obj) return -1;
-        Py_ssize_t idx = PySequence_Index(obj, val.get_obj());
-        if (idx == -1 && PyErr_Occurred()) { PyErr_Clear(); return -1; }
+        
+        Py_ssize_t idx = PySequence_Index(obj, value.get_obj());
+        if (idx == -1 && PyErr_Occurred()) { 
+            PyErr_Clear(); 
+            return -1; 
+        }
+        
         return idx;
     }
 
-    long count(const PyObj& val) const {
+    long count(const PyObj& value) const {
         if (!obj) return 0;
-        Py_ssize_t cnt = PySequence_Count(obj, val.get_obj());
-        if (cnt == -1 && PyErr_Occurred()) { PyErr_Clear(); return 0; }
-        return cnt;
+        
+        Py_ssize_t count_value = PySequence_Count(obj, value.get_obj());
+        if (count_value == -1 && PyErr_Occurred()) { 
+            PyErr_Clear(); 
+            return 0; 
+        }
+        
+        return count_value;
     }
 
+    bool contains(const PyObj& value) const {
+        if (!obj) return false;
+        
+        int result = PySequence_Contains(obj, value.get_obj());
+        if (result == -1) { 
+            PyErr_Clear(); 
+            return false; 
+        }
+        
+        return result == 1;
+    }
+
+    // Tuple operations
     Tuple operator+(const Tuple& other) const {
         if (!obj || !other.get_obj()) return Tuple();
-        PyObject* r = PySequence_Concat(obj, other.get_obj());
-        return Tuple(r);  
+        
+        PyObject* result = PySequence_Concat(obj, other.get_obj());
+        return Tuple(result);
     }
 
     Tuple operator*(long n) const {
         if (!obj) return Tuple();
-        PyObject* r = PySequence_Repeat(obj, n);
-        return Tuple(r);
+        
+        PyObject* result = PySequence_Repeat(obj, n);
+        return Tuple(result);
     }
 
-    bool contains(const PyObj& val) const {
-        if (!obj) return false;
-        int res = PySequence_Contains(obj, val.get_obj());
-        if (res == -1) { PyErr_Clear(); return false; }
-        return res == 1;
+    // Comparison operators
+    bool operator==(const Tuple& other) const {
+        if (!obj || !other.get_obj()) return false;
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_EQ) == 1;
+    }
+
+    bool operator!=(const Tuple& other) const {
+        if (!obj || !other.get_obj()) return true;
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_NE) == 1;
+    }
+
+    bool operator<(const Tuple& other) const {
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_LT) == 1;
+    }
+
+    bool operator<=(const Tuple& other) const {
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_LE) == 1;
+    }
+
+    bool operator>(const Tuple& other) const {
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_GT) == 1;
+    }
+
+    bool operator>=(const Tuple& other) const {
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_GE) == 1;
+    }
+
+    // Conversion
+    List to_list() const {
+        if (!obj) return List();
+        
+        PyObject* list = PySequence_List(obj);
+        return List(list);
+    }
+
+    // String representation
+    std::string str() const {
+        if (!obj) return "None";
+        
+        PyObject* string_obj = PyObject_Str(obj);
+        std::string result = PyUnicode_AsUTF8(string_obj);
+        Py_XDECREF(string_obj);
+        
+        return result;
     }
 };
 
-// ================== Set ==================
+
+// ================== Set Class ==================
 class Set : public PyObj {
+
+
 public:
     Set() : PyObj(PySet_New(nullptr)) {}
-    Set(PyObject* o) : PyObj(o) {}
-    Set(const std::initializer_list<PyObj>& l) : PyObj(PySet_New(nullptr)) {
-        for(auto& v:l) PySet_Add(obj,v.get_obj());
+    explicit Set(PyObject* o) : PyObj(o) {}
+    
+    Set(const std::initializer_list<PyObj>& elements) 
+        : PyObj(PySet_New(nullptr)) {
+        for (auto& value : elements)
+            PySet_Add(obj, value.get_obj());
     }
 
-    void add(const PyObj& v){ PySet_Add(obj,v.get_obj()); }
-    PyObj pop(){ return PyObj(PySet_Pop(obj)); }
-    long len() const { return obj ? PySet_Size(obj) : 0; }
-    bool contains(const PyObj& v) const { return obj && PySet_Contains(obj,v.get_obj())==1; }
+    // Set operations
+    void add(const PyObj& value) { 
+        PySet_Add(obj, value.get_obj()); 
+    }
+    
+    void clear() { 
+        PySet_Clear(obj); 
+    }
+    
+    PyObj pop() { 
+        return PyObj(PySet_Pop(obj)); 
+    }
 
-    Set union_with(const Set& s){ PyObject* r=PyNumber_Or(obj,s.get_obj()); return Set(r?r:PySet_New(nullptr)); }
-    Set intersection(const Set& s){ PyObject* r=PyNumber_And(obj,s.get_obj()); return Set(r?r:PySet_New(nullptr)); }
-    Set difference(const Set& s){ PyObject* r=PyNumber_Subtract(obj,s.get_obj()); return Set(r?r:PySet_New(nullptr)); }
-    bool issubset(const Set& s){ PyObject* r=PyObject_CallMethod(obj,(char*)"issubset",(char*)"O",s.get_obj()); bool b=r && PyObject_IsTrue(r); Py_XDECREF(r); return b; }
-    bool issuperset(const Set& s){ PyObject* r=PyObject_CallMethod(obj,(char*)"issuperset",(char*)"O",s.get_obj()); bool b=r && PyObject_IsTrue(r); Py_XDECREF(r); return b; }
+    // Basic properties
+    long len() const { return obj ? PySet_Size(obj) : 0; }
+    bool empty() const { return len() == 0; }
+
+    bool contains(const PyObj& value) const {
+        return obj && PySet_Contains(obj, value.get_obj()) == 1;
+    }
+
+    // Comparison operators
+    bool operator==(const Set& other) const { 
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_EQ) == 1; 
+    }
+    
+    bool operator!=(const Set& other) const { 
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_NE) == 1; 
+    }
+    
+    bool operator<(const Set& other)  const { 
+        return issubset(other) && !issuperset(other); 
+    }
+    
+    bool operator>(const Set& other)  const { 
+        return issuperset(other) && !issubset(other); 
+    }
+    
+    bool operator<=(const Set& other) const { 
+        return issubset(other); 
+    }
+    
+    bool operator>=(const Set& other) const { 
+        return issuperset(other); 
+    }
+
+    // Set theory operations
+    Set union_with(const Set& other) const {
+        PyObject* result = PyNumber_Or(obj, other.get_obj());
+        return Set(result ? result : PySet_New(nullptr));
+    }
+
+    Set intersection(const Set& other) const {
+        PyObject* result = PyNumber_And(obj, other.get_obj());
+        return Set(result ? result : PySet_New(nullptr));
+    }
+
+    Set difference(const Set& other) const {
+        PyObject* result = PyNumber_Subtract(obj, other.get_obj());
+        return Set(result ? result : PySet_New(nullptr));
+    }
+
+    Set symmetric_difference(const Set& other) const {
+        PyObject* result = PyNumber_Xor(obj, other.get_obj());
+        return Set(result ? result : PySet_New(nullptr));
+    }
+
+    // Compound assignment operators
+    Set& operator|=(const Set& other) {
+        PyObject* result = PyObject_CallMethod(obj, "update", "O", other.get_obj());
+        Py_XDECREF(result); 
+        return *this;
+    }
+
+    Set& operator&=(const Set& other) {
+        PyObject* intersection = PyNumber_And(obj, other.get_obj());
+        Py_XDECREF(obj);
+        obj = intersection;
+        return *this;
+    }
+    
+    Set& operator-=(const Set& other) {
+        PyObject* difference = PyNumber_Subtract(obj, other.get_obj());
+        Py_XDECREF(obj);
+        obj = difference;
+        return *this;
+    }
+    
+    Set& operator^=(const Set& other) {
+        PyObject* symmetric_diff = PyNumber_Xor(obj, other.get_obj());
+        Py_XDECREF(obj);
+        obj = symmetric_diff;
+        return *this;
+    }
+
+    // Binary set operators
+    Set operator|(const Set& other) const { return union_with(other); }
+    Set operator&(const Set& other) const { return intersection(other); }
+    Set operator-(const Set& other) const { return difference(other); }
+    Set operator^(const Set& other) const { return symmetric_difference(other); }
+
+    // Set relations
+    bool issubset(const Set& other) const {
+        PyObject* result = PyObject_CallMethod(obj, "issubset", "O", other.get_obj());
+        bool is_subset = result && PyObject_IsTrue(result);
+        Py_XDECREF(result);
+        
+        return is_subset;
+    }
+
+    bool issuperset(const Set& other) const {
+        PyObject* result = PyObject_CallMethod(obj, "issuperset", "O", other.get_obj());
+        bool is_superset = result && PyObject_IsTrue(result);
+        Py_XDECREF(result);
+        
+        return is_superset;
+    }
 };
 
-// ================== Dict ==================
+
+// ================== Dict Class ==================
 class Dict : public PyObj {
+
+
 public:
     Dict() : PyObj(PyDict_New()) {}
-    Dict(const std::initializer_list<std::pair<PyObj,PyObj>>& l) : PyObj(PyDict_New()){
-        for(auto& p:l) PyDict_SetItem(obj,p.first.get_obj(),p.second.get_obj());
+    explicit Dict(PyObject* o) : PyObj(o) {}
+    
+    Dict(const std::initializer_list<std::pair<PyObj, PyObj>>& elements)
+        : PyObj(PyDict_New()) {
+        for (auto& pair : elements)
+            PyDict_SetItem(obj, pair.first.get_obj(), pair.second.get_obj());
     }
 
-    void add(const PyObj& key,const PyObj& val){ PyDict_SetItem(obj,key.get_obj(),val.get_obj()); }
-    PyObj get(const PyObj& key) const{ PyObject* r=PyDict_GetItem(obj,key.get_obj()); Py_XINCREF(r); return r?PyObj(r):PyObj(); }
-    bool contains(const PyObj& key) const { return PyDict_Contains(obj,key.get_obj())==1; }
-    PyObj operator[](const PyObj& key) const{ return get(key); }
-    bool set(const PyObj& key,const PyObj& val){ return set_item(key,val); }
+    // Dictionary operations
+    void add(const PyObj& key, const PyObj& value) {
+        PyDict_SetItem(obj, key.get_obj(), value.get_obj());
+    }
+
+    PyObj get(const PyObj& key) const {
+        PyObject* result = PyDict_GetItem(obj, key.get_obj());
+        Py_XINCREF(result);
+        
+        return result ? PyObj(result) : PyObj();
+    }
+
+    bool contains(const PyObj& key) const {
+        return PyDict_Contains(obj, key.get_obj()) == 1;
+    }
+
+    PyObj operator[](const PyObj& key) const {
+        return get(key);
+    }
+
+    // Dictionary setter helper class
+    class DictSetter {
+        PyObject* dict;
+        PyObj key;
+        
+    public:
+        DictSetter(PyObject* d, const PyObj& k) : dict(d), key(k) {}
+
+        void operator=(const PyObj& value) const {
+            PyDict_SetItem(dict, key.get_obj(), value.get_obj());
+        }
+
+        operator PyObj() const {
+            PyObject* result = PyDict_GetItem(dict, key.get_obj());
+            Py_XINCREF(result);
+            
+            return result ? PyObj(result) : PyObj();
+        }
+    };
+
+    DictSetter operator[](const PyObj& key) {
+        return DictSetter(obj, key);
+    }
+
+    bool set(const PyObj& key, const PyObj& value) {
+        return PyDict_SetItem(obj, key.get_obj(), value.get_obj()) == 0;
+    }
+
+    // Dictionary properties
+    size_t len() const { return PyDict_Size(obj); }
+    bool empty() const { return PyDict_Size(obj) == 0; }
+    void clear() { PyDict_Clear(obj); }
+
+    PyObj pop(const PyObj& key) {
+        PyObject* value = PyDict_GetItem(obj, key.get_obj());
+        if (!value) return PyObj();
+        
+        Py_XINCREF(value);
+        PyDict_DelItem(obj, key.get_obj());
+        
+        return PyObj(value);
+    }
+
+    // Dictionary views
+    List keys() const { return List(PyDict_Keys(obj)); }
+    List values() const { return List(PyDict_Values(obj)); }
+    List items() const { return List(PyDict_Items(obj)); }
+
+    void update(const Dict& other) { 
+        PyDict_Update(obj, other.get_obj()); 
+    }
+
+    // Comparison operators
+    bool operator==(const Dict& other) const {
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_EQ) == 1;
+    }
+
+    bool operator!=(const Dict& other) const {
+        return PyObject_RichCompareBool(obj, other.get_obj(), Py_NE) == 1;
+    }
+
+    // Dictionary merging
+    Dict operator|(const Dict& other) const {
+        PyObject* merged = PyDict_Copy(obj);
+        PyDict_Update(merged, other.get_obj());
+        
+        return Dict(merged);
+    }
+
+    Dict& operator|=(const Dict& other) {
+        PyDict_Update(obj, other.get_obj());
+        return *this;
+    }
+
+    Dict operator+(const Dict& other) const {
+        PyObject* merged = PyDict_Copy(obj);
+        PyDict_Update(merged, other.get_obj());
+        
+        return Dict(merged);
+    }
+
+    Dict& operator+=(const Dict& other) {
+        PyDict_Update(obj, other.get_obj());
+        return *this;
+    }
 };
 
-// ================== Pretty Print ==================
+
+// ================== Pretty Print Implementation ==================
 namespace detail {
-inline void pretty_print(std::ostream& os, const PyObj& obj, int indent = 0){
-    if (!obj.get_obj()) { os << "None"; return; }
-    PyObject* o = obj.get_obj();
-    if (PyBool_Check(o)) { os << (o == Py_True ? "True" : "False"); return; }
-    if (PyLong_Check(o)) { os << PyLong_AsLong(o); return; }
-    if (PyFloat_Check(o)) { os << PyFloat_AsDouble(o); return; }
-    if (PyUnicode_Check(o)) { const char* s = PyUnicode_AsUTF8(o); os << "\"" << (s?s:"") << "\""; return; }
 
-    if (PyList_Check(o)) {
-        Py_ssize_t n = PyList_Size(o); if(n==0){os<<"[]"; return;}
-        os << "[\n"; for(Py_ssize_t i=0;i<n;++i){ for(int j=0;j<indent+4;++j) os<<' '; PyObject* it=PyList_GetItem(o,i); Py_XINCREF(it); pretty_print(os, PyObj(it), indent+4); Py_XDECREF(it); if(i!=n-1) os<<","; os<<"\n"; } for(int j=0;j<indent;++j) os<<' '; os<<"]"; return;}
-    if (PyTuple_Check(o)) { Py_ssize_t n=PyTuple_Size(o); if(n==0){os<<"()"; return;} os<<"(\n"; for(Py_ssize_t i=0;i<n;++i){ for(int j=0;j<indent+4;++j) os<<' '; PyObject* it=PyTuple_GetItem(o,i); Py_XINCREF(it); pretty_print(os, PyObj(it), indent+4); Py_XDECREF(it); if(i!=n-1) os<<","; os<<"\n"; } for(int j=0;j<indent;++j) os<<' '; os<<")"; return;}
-    if (PyDict_Check(o)){ Py_ssize_t pos=0; PyObject *key,*value; if(PyDict_Size(o)==0){os<<"{}"; return;} os<<"{\n"; bool first=true; while(PyDict_Next(o,&pos,&key,&value)){ if(!first) os<<",\n"; first=false; for(int j=0;j<indent+4;++j) os<<' '; Py_XINCREF(key); pretty_print(os, PyObj(key), indent+4); Py_XDECREF(key); os<<": "; Py_XINCREF(value); pretty_print(os, PyObj(value), indent+4); Py_XDECREF(value); } os<<"\n"; for(int j=0;j<indent;++j) os<<' '; os<<"}"; return;}
-    if (PySet_Check(o)){ PyObject* iter=PyObject_GetIter(o); if(!iter){ os<<"<set>"; return;} PyObject* item; bool first=true; os<<"{\n"; while((item=PyIter_Next(iter))){ if(!first) os<<",\n"; first=false; for(int j=0;j<indent+4;++j) os<<' '; pretty_print(os, PyObj(item), indent+4); Py_XDECREF(item);} Py_XDECREF(iter); os<<"\n"; for(int j=0;j<indent;++j) os<<' '; os<<"}"; return;}
-    PyObject* r = PyObject_Repr(o); if(r){ const char* s = PyUnicode_AsUTF8(r); os << (s?s:"<repr-error>"); Py_XDECREF(r); } else { PyErr_Clear(); os<<"<PyObj>"; }
+    
+inline void pretty_print(std::ostream& os, const PyObj& obj, int indent = 0) {
+    if (!obj.get_obj()) { 
+        os << "None"; 
+        return; 
+    }
+    
+    PyObject* object = obj.get_obj();
+    
+    // Handle basic types
+    if (PyBool_Check(object)) { 
+        os << (object == Py_True ? "True" : "False"); 
+        return; 
+    }
+    
+    if (PyLong_Check(object)) { 
+        os << PyLong_AsLong(object); 
+        return; 
+    }
+    
+    if (PyFloat_Check(object)) { 
+        os << PyFloat_AsDouble(object); 
+        return; 
+    }
+    
+    if (PyUnicode_Check(object)) { 
+        const char* str = PyUnicode_AsUTF8(object); 
+        os << "\"" << (str ? str : "") << "\""; 
+        return; 
+    }
+
+    // Handle lists
+    if (PyList_Check(object)) {
+        Py_ssize_t size = PyList_Size(object); 
+        if (size == 0) {
+            os << "[]"; 
+            return;
+        }
+        
+        os << "[\n"; 
+        for (Py_ssize_t i = 0; i < size; ++i) { 
+            for (int j = 0; j < indent + 4; ++j) os << ' '; 
+            
+            PyObject* item = PyList_GetItem(object, i); 
+            Py_XINCREF(item); 
+            pretty_print(os, PyObj(item), indent + 4); 
+            Py_XDECREF(item); 
+            
+            if (i != size - 1) os << ","; 
+            os << "\n"; 
+        } 
+        
+        for (int j = 0; j < indent; ++j) os << ' '; 
+        os << "]"; 
+        return;
+    }
+    
+    // Handle tuples
+    if (PyTuple_Check(object)) { 
+        Py_ssize_t size = PyTuple_Size(object); 
+        if (size == 0) {
+            os << "()"; 
+            return;
+        }
+        
+        os << "(\n"; 
+        for (Py_ssize_t i = 0; i < size; ++i) { 
+            for (int j = 0; j < indent + 4; ++j) os << ' '; 
+            
+            PyObject* item = PyTuple_GetItem(object, i); 
+            Py_XINCREF(item); 
+            pretty_print(os, PyObj(item), indent + 4); 
+            Py_XDECREF(item); 
+            
+            if (i != size - 1) os << ","; 
+            os << "\n"; 
+        } 
+        
+        for (int j = 0; j < indent; ++j) os << ' '; 
+        os << ")"; 
+        return;
+    }
+    
+    // Handle dictionaries
+    if (PyDict_Check(object)) { 
+        Py_ssize_t pos = 0; 
+        PyObject *key, *value; 
+        
+        if (PyDict_Size(object) == 0) {
+            os << "{}"; 
+            return;
+        }
+        
+        os << "{\n"; 
+        bool first = true; 
+        
+        while (PyDict_Next(object, &pos, &key, &value)) { 
+            if (!first) os << ",\n"; 
+            first = false; 
+            
+            for (int j = 0; j < indent + 4; ++j) os << ' '; 
+            
+            Py_XINCREF(key); 
+            pretty_print(os, PyObj(key), indent + 4); 
+            Py_XDECREF(key); 
+            
+            os << ": "; 
+            
+            Py_XINCREF(value); 
+            pretty_print(os, PyObj(value), indent + 4); 
+            Py_XDECREF(value); 
+        } 
+        
+        os << "\n"; 
+        for (int j = 0; j < indent; ++j) os << ' '; 
+        os << "}"; 
+        return;
+    }
+    
+    // Handle sets
+    if (PySet_Check(object)) { 
+        PyObject* iterator = PyObject_GetIter(object); 
+        if (!iterator) { 
+            os << "<set>"; 
+            return;
+        } 
+        
+        PyObject* item;
+        bool first = true; 
+        os << "{\n"; 
+        
+        while ((item = PyIter_Next(iterator))) { 
+            if (!first) os << ",\n"; 
+            first = false; 
+            
+            for (int j = 0; j < indent + 4; ++j) os << ' '; 
+            pretty_print(os, PyObj(item), indent + 4); 
+            Py_XDECREF(item);
+        } 
+        
+        Py_XDECREF(iterator); 
+        os << "\n"; 
+        for (int j = 0; j < indent; ++j) os << ' '; 
+        os << "}"; 
+        return;
+    }
+    
+    // Fallback: use repr
+    PyObject* repr = PyObject_Repr(object); 
+    if (repr) { 
+        const char* str = PyUnicode_AsUTF8(repr); 
+        os << (str ? str : "<repr-error>"); 
+        Py_XDECREF(repr); 
+    } else { 
+        PyErr_Clear(); 
+        os << "<PyObj>"; 
+    }
 }
-} // namespace detail
 
-inline std::ostream& operator<<(std::ostream& os, const PyObj& obj){
-    if(!obj.get_obj()){ os << "None"; return os; }
-    PyObject* r = PyObject_Repr(obj.get_obj());
-    if(r){ os << PyUnicode_AsUTF8(r); Py_XDECREF(r); }
-    else { PyErr_Clear(); os << "<invalid PyObj>"; }
+
+} // end namespace detail
+
+
+// ================== Output Operators ==================
+inline std::ostream& operator<<(std::ostream& os, const PyObj& obj) {
+    if (!obj.get_obj()) { 
+        os << "None"; 
+        return os; 
+    }
+    
+    PyObject* repr = PyObject_Repr(obj.get_obj());
+    if (repr) { 
+        os << PyUnicode_AsUTF8(repr); 
+        Py_XDECREF(repr); 
+    } else { 
+        PyErr_Clear(); 
+        os << "<PyObj>"; 
+    }
+    
     return os;
 }
 
-inline void PyObj::pretty_print(std::ostream& os,const PyObj& obj,int indent){ detail::pretty_print(os,obj,indent); }
-inline void print(const PyObj& obj){ std::cout<<obj<<std::endl; }
-inline void pprint(const PyObj& obj,int indent=0){ PyObj::pretty_print(std::cout,obj,indent); std::cout<<std::endl; }
 
-// ================== Utility ==================
-inline bool all(const List& l){ for(long i=0;i<l.len();++i) if(!PyObject_IsTrue(l[i].get_obj())) return false; return true; }
-inline bool any(const List& l){ for(long i=0;i<l.len();++i) if(PyObject_IsTrue(l[i].get_obj())) return true; return false; }
-inline List map(const PyObj& func,const List& l){ List out; for(long i=0;i<l.len();++i){ PyObject* r=PyObject_CallFunctionObjArgs(func.get_obj(),l[i].get_obj(),nullptr); if(r){ PyList_Append(out.get_obj(),r); Py_XDECREF(r);} else PyErr_Clear();} return out; }
-inline void exec(const std::string& code){ PyRun_SimpleString(code.c_str()); }
-inline PyObj eval(const std::string& code){ PyObject* globals=PyDict_New(); PyObject* locals=globals; PyObject* result=PyRun_String(code.c_str(),Py_eval_input,globals,locals); if(!result){ PyErr_Print(); Py_XDECREF(globals); return PyObj(); } Py_XDECREF(globals); return PyObj(result); }
-inline void run_file(const std::string& filename){ FILE* f=fopen(filename.c_str(),"r"); if(!f){ std::cerr<<"run_file: cannot open "<<filename<<"\n"; return;} PyRun_SimpleFile(f,filename.c_str()); fclose(f); }
-inline Dict run_file_result(const std::string& filename){ FILE* f=fopen(filename.c_str(),"r"); if(!f) return Dict(); PyObject* globals=PyDict_New(); PyObject* locals=globals; PyRun_File(f,filename.c_str(),Py_file_input,globals,locals); fclose(f); Dict result; PyObject *key,*value; Py_ssize_t pos=0; while(PyDict_Next(globals,&pos,&key,&value)){ if(!PyUnicode_Check(key)) continue; const char* k=PyUnicode_AsUTF8(key); if(!k) continue; std::string key_str(k); if(key_str.empty()||key_str=="__builtins__") continue; result.add(PyObj(key),PyObj(value)); } Py_XDECREF(globals); return result; }
-inline Str type(const PyObj& o){ if(!o.get_obj()) return Str("<NoneType>"); PyObject* t=PyObject_Type(o.get_obj()); if(!t) return Str("<unknown>"); PyObject* name=PyObject_GetAttrString(t,"__name__"); Py_XDECREF(t); if(!name) return Str("<unknown>"); const char* s=PyUnicode_AsUTF8(name); Str res(s?s:"<unknown>"); Py_XDECREF(name); return res; }
-
-// ================== fstring ==================
-template<typename T>
-std::pair<std::string,std::string> farg(const std::string& name,T&& value){
-  std::ostringstream os; os<<value; return {name,os.str()};
+inline void PyObj::pretty_print(std::ostream& os, const PyObj& obj, int indent) { 
+    detail::pretty_print(os, obj, indent); 
 }
+
+
+inline void print(const PyObj& obj = PyObj("None")) {
+    if (obj.str() != "None")
+        std::cout << obj << std::endl;
+    else
+        std::cout << std::endl;
+}
+
+
+inline void pprint(const PyObj& obj, int indent = 0) {
+    PyObj::pretty_print(std::cout, obj, indent);
+    std::cout << std::endl;
+}
+
+
+// ================== Utility Functions ==================
+inline bool all(const List& list) { 
+    for (long i = 0; i < list.len(); ++i) 
+        if (!PyObject_IsTrue(list[i].get_obj())) 
+            return false; 
+    return true; 
+}
+
+
+inline bool any(const List& list) { 
+    for (long i = 0; i < list.len(); ++i) 
+        if (PyObject_IsTrue(list[i].get_obj())) 
+            return true; 
+    return false; 
+}
+
+
+inline List map(const PyObj& function, const List& list) { 
+    List output; 
+    for (long i = 0; i < list.len(); ++i) { 
+        PyObject* result = PyObject_CallFunctionObjArgs(function.get_obj(), list[i].get_obj(), nullptr); 
+        if (result) { 
+            PyList_Append(output.get_obj(), result); 
+            Py_XDECREF(result); 
+        } else {
+            PyErr_Clear();
+        }
+    } 
+    return output; 
+}
+
+
+inline void exec(const std::string& code) { 
+    PyRun_SimpleString(code.c_str()); 
+}
+
+
+inline PyObj eval(const std::string& code) { 
+    PyObject* globals = PyDict_New(); 
+    PyObject* locals = globals; 
+    PyObject* result = PyRun_String(code.c_str(), Py_eval_input, globals, locals); 
+    
+    if (!result) { 
+        PyErr_Print(); 
+        Py_XDECREF(globals); 
+        return PyObj(); 
+    } 
+    
+    Py_XDECREF(globals); 
+    return PyObj(result); 
+}
+
+
+inline void run_file(const std::string& filename) { 
+    FILE* file = fopen(filename.c_str(), "r"); 
+    if (!file) { 
+        std::cerr << "run_file: cannot open " << filename << "\n"; 
+        return;
+    } 
+    
+    PyRun_SimpleFile(file, filename.c_str()); 
+    fclose(file); 
+}
+
+
+inline Dict run_file_result(const std::string& filename) { 
+    FILE* file = fopen(filename.c_str(), "r"); 
+    if (!file) return Dict(); 
+    
+    PyObject* globals = PyDict_New(); 
+    PyObject* locals = globals; 
+    PyRun_File(file, filename.c_str(), Py_file_input, globals, locals); 
+    fclose(file); 
+    
+    Dict result;
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
+    
+    while (PyDict_Next(globals, &pos, &key, &value)) { 
+        if (!PyUnicode_Check(key)) continue; 
+        
+        const char* key_str = PyUnicode_AsUTF8(key); 
+        if (!key_str) continue; 
+        
+        std::string key_string(key_str); 
+        if (key_string.empty() || key_string == "__builtins__") continue; 
+        
+        result.add(PyObj(key), PyObj(value)); 
+    } 
+    
+    Py_XDECREF(globals); 
+    return result; 
+}
+
+
+inline Str type(const PyObj& obj) { 
+    if (!obj.get_obj()) return Str("<NoneType>"); 
+    
+    PyObject* type_obj = PyObject_Type(obj.get_obj()); 
+    if (!type_obj) return Str("<unknown>"); 
+    
+    PyObject* name = PyObject_GetAttrString(type_obj, "__name__"); 
+    Py_XDECREF(type_obj); 
+    
+    if (!name) return Str("<unknown>"); 
+    
+    const char* type_name = PyUnicode_AsUTF8(name); 
+    Str result(type_name ? type_name : "<unknown>"); 
+    Py_XDECREF(name); 
+    
+    return result; 
+}
+
+
+// ================== Formatted String ==================
+template<typename T>
+std::pair<std::string, std::string> farg(const std::string& name, T&& value) {
+    std::ostringstream os; 
+    os << value; 
+    return {name, os.str()};
+}
+
 
 template<typename... Args>
-std::string fstring(const std::string& fmt, Args&&... args){
-  std::unordered_map<std::string,std::string> named;
-  std::vector<std::string> positional;
-  auto process=[&](auto&& x){
-    using X=std::decay_t<decltype(x)>;
-    if constexpr(std::is_same_v<X,std::pair<std::string,std::string>>) named.emplace(x.first,x.second);
-    else { std::ostringstream os; os<<x; positional.push_back(os.str()); }
-  };
-  (process(std::forward<Args>(args)),...);
-  std::string out; out.reserve(fmt.size()+32); size_t pos_index=0;
-  for(size_t i=0;i<fmt.size();++i){
-    if(fmt[i]=='{'){
-      if(i+1<fmt.size() && fmt[i+1]=='{'){ out.push_back('{'); ++i; continue; }
-      size_t j=fmt.find('}',i+1); if(j==std::string::npos){ out.push_back('{'); continue; }
-      std::string key=fmt.substr(i+1,j-i-1); if(key.empty()){ if(pos_index<positional.size()) out+=positional[pos_index++]; else out+="{}"; }
-      else { auto it=named.find(key); if(it!=named.end()) out+=it->second; else out+="{" + key + "}"; }
-      i=j;
-    } else if(fmt[i]=='}'){ if(i+1<fmt.size() && fmt[i+1]=='}'){ out.push_back('}'); ++i; } else out.push_back('}'); }
-    else out.push_back(fmt[i]);
-  }
-  return out;
+std::string fstring(const std::string& format, Args&&... args) {
+    std::unordered_map<std::string, std::string> named_args;
+    std::vector<std::string> positional_args;
+    
+    auto process_arg = [&](auto&& arg) {
+        using ArgType = std::decay_t<decltype(arg)>;
+        
+        if constexpr (std::is_same_v<ArgType, std::pair<std::string, std::string>>) {
+            named_args.emplace(arg.first, arg.second);
+        } else {
+            std::ostringstream os; 
+            os << arg; 
+            positional_args.push_back(os.str());
+        }
+    };
+    
+    (process_arg(std::forward<Args>(args)), ...);
+    
+    std::string output;
+    output.reserve(format.size() + 32);
+    size_t position_index = 0;
+    
+    for (size_t i = 0; i < format.size(); ++i) {
+        if (format[i] == '{') {
+            // Handle escaped braces
+            if (i + 1 < format.size() && format[i + 1] == '{') {
+                output.push_back('{');
+                ++i;
+                continue;
+            }
+            
+            // Find closing brace
+            size_t j = format.find('}', i + 1);
+            if (j == std::string::npos) {
+                output.push_back('{');
+                continue;
+            }
+            
+            std::string key = format.substr(i + 1, j - i - 1);
+            
+            // Handle empty key (positional) or named key
+            if (key.empty()) {
+                if (position_index < positional_args.size()) {
+                    output += positional_args[position_index++];
+                } else {
+                    output += "{}";
+                }
+            } else {
+                auto it = named_args.find(key);
+                if (it != named_args.end()) {
+                    output += it->second;
+                } else {
+                    output += "{" + key + "}";
+                }
+            }
+            
+            i = j;
+        } else if (format[i] == '}') {
+            // Handle escaped braces
+            if (i + 1 < format.size() && format[i + 1] == '}') {
+                output.push_back('}');
+                ++i;
+            } else {
+                output.push_back('}');
+            }
+        } else {
+            output.push_back(format[i]);
+        }
+    }
+    
+    return output;
 }
 
-// ================== Global sort ==================
-inline long len(const PyObj& o){
-    if(!o.get_obj()) return 0;
-    if(o.is_str()) return PyUnicode_GetLength(o.get_obj());
-    if(o.is_list()) return PyList_Size(o.get_obj());
-    if(o.is_tuple()) return PyTuple_Size(o.get_obj());
-    if(o.is_set()) return PySet_Size(o.get_obj());
-    if(o.is_dict()) return PyDict_Size(o.get_obj());
+
+// ================== Global Functions ==================
+inline long len(const PyObj& obj) {
+    if (!obj.get_obj()) return 0;
+    
+    if (obj.is_str()) return PyUnicode_GetLength(obj.get_obj());
+    if (obj.is_list()) return PyList_Size(obj.get_obj());
+    if (obj.is_tuple()) return PyTuple_Size(obj.get_obj());
+    if (obj.is_set()) return PySet_Size(obj.get_obj());
+    if (obj.is_dict()) return PyDict_Size(obj.get_obj());
+    
     return 0;
 }
 
-inline List sorted(const PyObj& seq){
-    if(!seq.get_obj()) return List();
-    PyObject* tmp = PySequence_List(seq.get_obj());
-    if(!tmp){ PyErr_Clear(); return List(); }
-    PyList_Sort(tmp);
-    List out;
-    Py_ssize_t n = PyList_Size(tmp);
-    for(Py_ssize_t i=0;i<n;++i){
-        PyObject* it = PyList_GetItem(tmp,i); Py_XINCREF(it);
-        PyList_Append(out.get_obj(), it); Py_XDECREF(it);
+
+inline List sorted(const PyObj& sequence) {
+    if (!sequence.get_obj()) return List();
+    
+    PyObject* temp_list = PySequence_List(sequence.get_obj());
+    if (!temp_list) { 
+        PyErr_Clear(); 
+        return List(); 
     }
-    Py_XDECREF(tmp);
-    return out;
+    
+    PyList_Sort(temp_list);
+    List output;
+    Py_ssize_t size = PyList_Size(temp_list);
+    
+    for (Py_ssize_t i = 0; i < size; ++i) {
+        PyObject* item = PyList_GetItem(temp_list, i); 
+        Py_XINCREF(item);
+        PyList_Append(output.get_obj(), item); 
+        Py_XDECREF(item);
+    }
+    
+    Py_XDECREF(temp_list);
+    return output;
 }
 
 
-inline PyObj reversed(const PyObj& o){
-    if(!o.get_obj()) return PyObj();
-    if(o.is_str()){
-        PyObject* r = PyObject_CallMethod(o.get_obj(), (char*)"__reversed__", nullptr);
-        if(!r){ PyErr_Clear(); return PyObj(); }
-        PyObject* seq = PySequence_List(r); Py_XDECREF(r);
-        PyObject* joined = PyUnicode_Join(PyUnicode_FromString(""), seq); Py_XDECREF(seq);
+inline PyObj reversed(const PyObj& obj) {
+    if (!obj.get_obj()) return PyObj();
+    
+    if (obj.is_str()) {
+        PyObject* reversed_obj = PyObject_CallMethod(obj.get_obj(), "__reversed__", nullptr);
+        if (!reversed_obj) { 
+            PyErr_Clear(); 
+            return PyObj(); 
+        }
+        
+        PyObject* sequence = PySequence_List(reversed_obj); 
+        Py_XDECREF(reversed_obj);
+        PyObject* joined = PyUnicode_Join(PyUnicode_FromString(""), sequence); 
+        Py_XDECREF(sequence);
+        
         return PyObj(joined);
     }
-    if(o.is_list() || o.is_tuple()){
-        PyObject* r = PyObject_CallMethod(o.get_obj(), (char*)"__reversed__", nullptr);
-        if(!r){ PyErr_Clear(); return PyObj(); }
-        PyObject* seq = PySequence_List(r); Py_XDECREF(r);
-        if(o.is_tuple()){ PyObject* t = PySequence_Tuple(seq); Py_XDECREF(seq); return PyObj(t); }
-        return PyObj(seq);
+    
+    if (obj.is_list() || obj.is_tuple()) {
+        PyObject* reversed_obj = PyObject_CallMethod(obj.get_obj(), "__reversed__", nullptr);
+        if (!reversed_obj) { 
+            PyErr_Clear(); 
+            return PyObj(); 
+        }
+        
+        PyObject* sequence = PySequence_List(reversed_obj); 
+        Py_XDECREF(reversed_obj);
+        
+        if (obj.is_tuple()) {
+            PyObject* tuple = PySequence_Tuple(sequence); 
+            Py_XDECREF(sequence); 
+            return PyObj(tuple); 
+        }
+        
+        return PyObj(sequence);
     }
+    
     PyErr_Clear();
     return PyObj();
 }
 
-// ================== JSON ==================
-inline PyObj json_loads(const Str& s){
-    PyObject* json_mod = PyImport_ImportModule("json"); if(!json_mod){ PyErr_Clear(); return PyObj(); }
-    PyObject* loads = PyObject_GetAttrString(json_mod,"loads"); Py_XDECREF(json_mod); if(!loads){ PyErr_Clear(); return PyObj(); }
-    PyObject* r = PyObject_CallFunctionObjArgs(loads, s.get_obj(), nullptr); Py_XDECREF(loads);
-    return r ? PyObj(r) : PyObj();
-}
-inline Str json_dumps(const PyObj& o){
-    PyObject* json_mod = PyImport_ImportModule("json"); if(!json_mod){ PyErr_Clear(); return Str(); }
-    PyObject* dumps = PyObject_GetAttrString(json_mod,"dumps"); Py_XDECREF(json_mod); if(!dumps){ PyErr_Clear(); return Str(); }
-    PyObject* r = PyObject_CallFunctionObjArgs(dumps, o.get_obj(), nullptr); Py_XDECREF(dumps);
-    Str res(r); Py_XDECREF(r); return res;
+
+// ================== JSON Functions ==================
+inline bool json_dump(const PyObj& obj, const Str& filename, int indent = -1) {
+    PyObject* json_module = PyImport_ImportModule("json");
+    if (!json_module) { 
+        PyErr_Clear(); 
+        return false; 
+    }
+
+    PyObject* dump_func = PyObject_GetAttrString(json_module, "dump");
+    Py_XDECREF(json_module);
+    
+    if (!dump_func) { 
+        PyErr_Clear(); 
+        return false; 
+    }
+
+    PyObject* file_obj = PyObject_CallMethod(
+        PyImport_ImportModule("builtins"),
+        "open", "ss", filename.str().c_str(), "w"
+    );
+    
+    if (!file_obj) { 
+        PyErr_Clear(); 
+        Py_XDECREF(dump_func); 
+        return false; 
+    }
+
+    PyObject* kwargs = PyDict_New();
+    if (indent >= 0) {
+        PyDict_SetItemString(kwargs, "indent", PyLong_FromLong(indent));
+    }
+
+    PyObject* result = PyObject_CallFunctionObjArgs(dump_func, obj.get_obj(), file_obj, nullptr);
+    Py_XDECREF(result);
+
+    PyObject* close_result = PyObject_CallMethod(file_obj, "close", nullptr);
+    Py_XDECREF(close_result);
+
+    Py_XDECREF(file_obj);
+    Py_XDECREF(kwargs);
+    Py_XDECREF(dump_func);
+    
+    return true;
 }
 
 
-} // end namespace py
+inline Str json_dumps(const PyObj& obj) {
+    PyObject* json_module = PyImport_ImportModule("json"); 
+    if (!json_module) { 
+        PyErr_Clear(); 
+        return Str(); 
+    }
+
+    PyObject* dumps_func = PyObject_GetAttrString(json_module, "dumps"); 
+    Py_XDECREF(json_module); 
+    if (!dumps_func) { 
+        PyErr_Clear(); 
+        return Str(); 
+    }
+
+    PyObject* result = PyObject_CallFunctionObjArgs(dumps_func, obj.get_obj(), nullptr); 
+    Py_XDECREF(dumps_func);
+    
+    Str output(result); 
+    Py_XDECREF(result); 
+    return output;
+}
+
+
+inline PyObj json_load(const Str& filename) {
+    PyObject* json_module = PyImport_ImportModule("json");
+    if (!json_module) { 
+        PyErr_Clear(); 
+        return PyObj(); 
+    }
+
+    PyObject* load_func = PyObject_GetAttrString(json_module, "load");
+    Py_XDECREF(json_module);
+    if (!load_func) { 
+        PyErr_Clear(); 
+        return PyObj(); 
+    }
+
+    PyObject* file_obj = PyObject_CallMethod(
+        PyImport_ImportModule("builtins"),
+        "open", "ss", filename.str().c_str(), "r"
+    );
+    
+    if (!file_obj) { 
+        PyErr_Clear(); 
+        Py_XDECREF(load_func); 
+        return PyObj(); 
+    }
+
+    PyObject* result = PyObject_CallFunctionObjArgs(load_func, file_obj, nullptr);
+    PyObject* close_result = PyObject_CallMethod(file_obj, "close", nullptr);
+    Py_XDECREF(close_result);
+    Py_XDECREF(file_obj);
+    Py_XDECREF(load_func);
+
+    return result ? PyObj(result) : PyObj();
+}
+
+
+inline PyObj json_loads(const Str& json_string) {
+    PyObject* json_module = PyImport_ImportModule("json"); 
+    if (!json_module) { 
+        PyErr_Clear(); 
+        return PyObj(); 
+    }
+
+    PyObject* loads_func = PyObject_GetAttrString(json_module, "loads"); 
+    Py_XDECREF(json_module); 
+    if (!loads_func) { 
+        PyErr_Clear(); 
+        return PyObj(); 
+    }
+    
+    PyObject* result = PyObject_CallFunctionObjArgs(loads_func, json_string.get_obj(), nullptr); 
+    Py_XDECREF(loads_func);
+    
+    return result ? PyObj(result) : PyObj();
+}
+
+
+} // namespace py
