@@ -31,19 +31,14 @@ inline void init_python() {
     if (!Py_IsInitialized()) Py_Initialize(); 
 }
 
-
 inline void exit_python() { 
     if (Py_IsInitialized()) Py_FinalizeEx(); 
 }
 
-
 // ================== Base PyObj Class ==================
 class PyObj {
-
-
 protected:
     PyObject* obj;
-
 
 public:
     // Constructors
@@ -217,11 +212,8 @@ public:
     static void pretty_print(std::ostream& os, const PyObj& obj, int indent = 0);
 };
 
-
 // ================== String Class ==================
 class Str : public PyObj {
-
-
 public:
     // Constructors
     Str() : PyObj("") {}
@@ -379,7 +371,7 @@ public:
             for (Py_ssize_t i = 0; i < size; ++i) {
                 PyObject* item = PyList_GetItem(result, i); 
                 Py_XINCREF(item); 
-                output.push_back(Str(item)); 
+                output.emplace_back(item); 
             }
         }
         
@@ -389,6 +381,8 @@ public:
 
     Str join(const std::vector<Str>& sequence) const {
         PyObject* list_obj = PyList_New(sequence.size());
+        if (!list_obj) return Str();
+        
         for (Py_ssize_t i = 0; i < sequence.size(); ++i) {
             Py_XINCREF(sequence[i].get_obj()); 
             PyList_SetItem(list_obj, i, sequence[i].get_obj()); 
@@ -480,24 +474,26 @@ public:
         if (!obj) return "None";
         
         PyObject* string_obj = PyObject_Str(obj);
-        std::string result = PyUnicode_AsUTF8(string_obj);
+        if (!string_obj) return "None";
+        
+        const char* c_str = PyUnicode_AsUTF8(string_obj);
+        std::string result = c_str ? c_str : "";
         Py_XDECREF(string_obj);
         
         return result;
     }
 };
 
-
 // ================== List Class ==================
 class List : public PyObj {
-
-
 public:
     List() : PyObj(PyList_New(0)) {}
     explicit List(PyObject* o) : PyObj(o) {}
     
     List(const std::initializer_list<PyObj>& elements)
         : PyObj(PyList_New(elements.size())) {
+        if (!obj) return;
+        
         size_t index = 0;
         for (const auto& value : elements) {
             Py_XINCREF(value.get_obj());
@@ -526,6 +522,8 @@ public:
     }
     
     PyObj pop(int index = -1) {
+        if (!obj) return PyObj();
+        
         Py_ssize_t size = PyList_Size(obj);
         if (index < 0) index += size;
         if (index < 0 || index >= size) return PyObj();
@@ -585,6 +583,8 @@ public:
 
     // Indexing
     PyObj operator[](long index) const {
+        if (!obj) return PyObj();
+        
         Py_ssize_t size = PyList_Size(obj);
         if (index < 0) index += size;
         if (index < 0 || index >= size) return PyObj();
@@ -596,6 +596,7 @@ public:
     }
 
     bool set(long index, const PyObj& value) {
+        if (!obj) return false;
         return PyList_SetItem(obj, index, value.get_obj()) == 0;
     }
 
@@ -658,24 +659,29 @@ public:
         if (!obj) return "None";
         
         PyObject* string_obj = PyObject_Str(obj);
-        std::string result = PyUnicode_AsUTF8(string_obj);
+        if (!string_obj) return "None";
+        
+        const char* c_str = PyUnicode_AsUTF8(string_obj);
+        std::string result = c_str ? c_str : "";
         Py_XDECREF(string_obj);
         
         return result;
     }
 };
 
-
 // ================== Tuple Class ==================
 class Tuple : public PyObj {
-
-
 public:
     Tuple() : PyObj(PyTuple_New(0)) {}
     explicit Tuple(PyObject* o) : PyObj(o) {}
     
     Tuple(const std::initializer_list<PyObj>& elements) {
         PyObject* tuple = PyTuple_New(elements.size());
+        if (!tuple) {
+            obj = nullptr;
+            return;
+        }
+        
         size_t index = 0;
         for (auto& value : elements) {
             Py_XINCREF(value.get_obj());
@@ -791,24 +797,26 @@ public:
         if (!obj) return "None";
         
         PyObject* string_obj = PyObject_Str(obj);
-        std::string result = PyUnicode_AsUTF8(string_obj);
+        if (!string_obj) return "None";
+        
+        const char* c_str = PyUnicode_AsUTF8(string_obj);
+        std::string result = c_str ? c_str : "";
         Py_XDECREF(string_obj);
         
         return result;
     }
 };
 
-
 // ================== Set Class ==================
 class Set : public PyObj {
-
-
 public:
     Set() : PyObj(PySet_New(nullptr)) {}
     explicit Set(PyObject* o) : PyObj(o) {}
     
     Set(const std::initializer_list<PyObj>& elements) 
         : PyObj(PySet_New(nullptr)) {
+        if (!obj) return;
+        
         for (auto& value : elements)
             PySet_Add(obj, value.get_obj());
     }
@@ -889,22 +897,28 @@ public:
 
     Set& operator&=(const Set& other) {
         PyObject* intersection = PyNumber_And(obj, other.get_obj());
-        Py_XDECREF(obj);
-        obj = intersection;
+        if (intersection) {
+            Py_XDECREF(obj);
+            obj = intersection;
+        }
         return *this;
     }
     
     Set& operator-=(const Set& other) {
         PyObject* difference = PyNumber_Subtract(obj, other.get_obj());
-        Py_XDECREF(obj);
-        obj = difference;
+        if (difference) {
+            Py_XDECREF(obj);
+            obj = difference;
+        }
         return *this;
     }
     
     Set& operator^=(const Set& other) {
         PyObject* symmetric_diff = PyNumber_Xor(obj, other.get_obj());
-        Py_XDECREF(obj);
-        obj = symmetric_diff;
+        if (symmetric_diff) {
+            Py_XDECREF(obj);
+            obj = symmetric_diff;
+        }
         return *this;
     }
 
@@ -932,17 +946,16 @@ public:
     }
 };
 
-
 // ================== Dict Class ==================
 class Dict : public PyObj {
-
-
 public:
     Dict() : PyObj(PyDict_New()) {}
     explicit Dict(PyObject* o) : PyObj(o) {}
     
     Dict(const std::initializer_list<std::pair<PyObj, PyObj>>& elements)
         : PyObj(PyDict_New()) {
+        if (!obj) return;
+        
         for (auto& pair : elements)
             PyDict_SetItem(obj, pair.first.get_obj(), pair.second.get_obj());
     }
@@ -1031,8 +1044,9 @@ public:
     // Dictionary merging
     Dict operator|(const Dict& other) const {
         PyObject* merged = PyDict_Copy(obj);
-        PyDict_Update(merged, other.get_obj());
+        if (!merged) return Dict();
         
+        PyDict_Update(merged, other.get_obj());
         return Dict(merged);
     }
 
@@ -1043,8 +1057,9 @@ public:
 
     Dict operator+(const Dict& other) const {
         PyObject* merged = PyDict_Copy(obj);
-        PyDict_Update(merged, other.get_obj());
+        if (!merged) return Dict();
         
+        PyDict_Update(merged, other.get_obj());
         return Dict(merged);
     }
 
@@ -1054,7 +1069,6 @@ public:
     }
 };
 
-
 // ================== Formatted String ==================
 template<typename T>
 std::pair<std::string, std::string> farg(const std::string& name, T&& value) {
@@ -1062,7 +1076,6 @@ std::pair<std::string, std::string> farg(const std::string& name, T&& value) {
     os << value; 
     return {name, os.str()};
 }
-
 
 template<typename... Args>
 std::string fstring(const std::string& format, Args&&... args) {
@@ -1138,11 +1151,8 @@ std::string fstring(const std::string& format, Args&&... args) {
     return output;
 }
 
-
 // ================== Pretty Print Implementation ==================
 namespace detail {
-
-    
 inline void pretty_print(std::ostream& os, const PyObj& obj, int indent = 0) {
     if (!obj.get_obj()) { 
         os << "None"; 
@@ -1301,9 +1311,7 @@ inline void pretty_print(std::ostream& os, const PyObj& obj, int indent = 0) {
     }
 }
 
-
 } // end namespace detail
-
 
 // ================== Output Operators ==================
 inline std::ostream& operator<<(std::ostream& os, const PyObj& obj) {
@@ -1324,7 +1332,6 @@ inline std::ostream& operator<<(std::ostream& os, const PyObj& obj) {
     return os;
 }
 
-
 // ================== Global Functions ==================
 inline Str type(const PyObj& obj) { 
     if (!obj.get_obj()) return Str("<NoneType>"); 
@@ -1344,7 +1351,6 @@ inline Str type(const PyObj& obj) {
     return result; 
 }
 
-
 inline long len(const PyObj& obj) {
     if (!obj.get_obj()) return 0;
     
@@ -1356,7 +1362,6 @@ inline long len(const PyObj& obj) {
     
     return 0;
 }
-
 
 inline List sorted(const PyObj& sequence) {
     if (!sequence.get_obj()) return List();
@@ -1381,7 +1386,6 @@ inline List sorted(const PyObj& sequence) {
     Py_XDECREF(temp_list);
     return output;
 }
-
 
 inline PyObj reversed(const PyObj& obj) {
     if (!obj.get_obj()) return PyObj();
@@ -1424,11 +1428,9 @@ inline PyObj reversed(const PyObj& obj) {
     return PyObj();
 }
 
-
 inline void PyObj::pretty_print(std::ostream& os, const PyObj& obj, int indent) { 
     detail::pretty_print(os, obj, indent); 
 }
-
 
 inline void print(const PyObj& obj = PyObj("None")) {
     if (obj.str() != "None")
@@ -1437,12 +1439,10 @@ inline void print(const PyObj& obj = PyObj("None")) {
         std::cout << std::endl;
 }
 
-
 inline void pprint(const PyObj& obj, int indent = 0) {
     PyObj::pretty_print(std::cout, obj, indent);
     std::cout << std::endl;
 }
-
 
 // ================== Utility Functions ==================
 inline bool all(const List& list) { 
@@ -1452,14 +1452,12 @@ inline bool all(const List& list) {
     return true; 
 }
 
-
 inline bool any(const List& list) { 
     for (long i = 0; i < list.len(); ++i) 
         if (PyObject_IsTrue(list[i].get_obj())) 
             return true; 
     return false; 
 }
-
 
 inline List map(const PyObj& function, const List& list) { 
     List output; 
@@ -1475,25 +1473,20 @@ inline List map(const PyObj& function, const List& list) {
     return output; 
 }
 
-
-inline void exec(const std::string& code) { 
-    PyRun_SimpleString(code.c_str()); 
-}
-
-
-inline PyObj eval(const std::string& code) {
+inline PyObj run_code(PyObject* codeObj, const std::string& source_name) {
     PyObject* globals = PyDict_New();
-    PyDict_SetItemString(globals, "__builtins__", PyEval_GetBuiltins()); 
+    if (!globals) return PyObj();
+    
+    PyDict_SetItemString(globals, "__builtins__", PyEval_GetBuiltins());
 
-    PyObject* result = PyRun_String(code.c_str(), Py_file_input, globals, globals);
+    PyObject* result = PyEval_EvalCode(codeObj, globals, globals);
 
     if (!result) {
         PyErr_Print();
-        Py_XDECREF(globals);
+        Py_DECREF(globals);
         return PyObj();
     }
-
-    Py_XDECREF(result);
+    Py_DECREF(result);
 
     const char* system_keys[] = {
         "__builtins__", 
@@ -1507,15 +1500,28 @@ inline PyObj eval(const std::string& code) {
 
     for (const char* key : system_keys) {
         PyObject* pyKey = PyUnicode_FromString(key);
-        if (PyDict_Contains(globals, pyKey)) {
+        if (pyKey && PyDict_Contains(globals, pyKey))
             PyDict_DelItem(globals, pyKey);
-        }
-        Py_DECREF(pyKey); 
+        Py_XDECREF(pyKey);
     }
 
     return PyObj(globals);
 }
 
+inline void exec(const std::string& code) { 
+    PyRun_SimpleString(code.c_str()); 
+}
+
+inline PyObj eval(const std::string& code) {
+    PyObject* codeObj = Py_CompileString(code.c_str(), "<string>", Py_file_input);
+    if (!codeObj) {
+        PyErr_Print();
+        return PyObj();
+    }
+    PyObj result = run_code(codeObj, "<string>");
+    Py_DECREF(codeObj);
+    return result;
+}
 
 inline void run_file(const std::string& filename) { 
     FILE* file = fopen(filename.c_str(), "r"); 
@@ -1528,36 +1534,50 @@ inline void run_file(const std::string& filename) {
     fclose(file); 
 }
 
+inline PyObj run_file_result(const std::string& filename) {
+    FILE* file = fopen(filename.c_str(), "r");
 
-inline Dict run_file_result(const std::string& filename) { 
-    FILE* file = fopen(filename.c_str(), "r"); 
-    if (!file) return Dict(); 
+    if (!file) {
+        PyErr_SetFromErrnoWithFilename(PyExc_OSError, filename.c_str());
+        PyErr_Print();
+        return PyObj();
+    }
+
+    std::string code;
+
+    {
+        fseek(file, 0, SEEK_END);
+        long size = ftell(file);
+        rewind(file);
+
+        if (size <= 0) {
+            fclose(file);
+            return PyObj();
+        }
+
+        code.resize(size);
+        size_t read = fread(&code[0], 1, size, file);
+        fclose(file);
+
+        if (read != static_cast<size_t>(size)) {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to read entire file");
+            PyErr_Print();
+            return PyObj();
+        }
+    }
+
+    PyObject* codeObj = Py_CompileString(code.c_str(), filename.c_str(), Py_file_input);
     
-    PyObject* globals = PyDict_New(); 
-    PyObject* locals = globals; 
-    PyRun_File(file, filename.c_str(), Py_file_input, globals, locals); 
-    fclose(file); 
-    
-    Dict result;
-    PyObject *key, *value;
-    Py_ssize_t pos = 0;
-    
-    while (PyDict_Next(globals, &pos, &key, &value)) { 
-        if (!PyUnicode_Check(key)) continue; 
-        
-        const char* key_str = PyUnicode_AsUTF8(key); 
-        if (!key_str) continue; 
-        
-        std::string key_string(key_str); 
-        if (key_string.empty() || key_string == "__builtins__") continue; 
-        
-        result.add(PyObj(key), PyObj(value)); 
-    } 
-    
-    Py_XDECREF(globals); 
-    return result; 
+    if (!codeObj) {
+        PyErr_Print();
+        return PyObj();
+    }
+
+    PyObj result = run_code(codeObj, filename);
+
+    Py_DECREF(codeObj);
+    return result;
 }
-
 
 // ================== JSON Functions ==================
 inline bool json_dump(const PyObj& obj, const Str& filename, int indent = -1) {
@@ -1591,7 +1611,7 @@ inline bool json_dump(const PyObj& obj, const Str& filename, int indent = -1) {
         PyDict_SetItemString(kwargs, "indent", PyLong_FromLong(indent));
     }
 
-    PyObject* result = PyObject_CallFunctionObjArgs(dump_func, obj.get_obj(), file_obj, nullptr);
+    PyObject* result = PyObject_Call(dump_func, Py_BuildValue("(OO)", obj.get_obj(), file_obj), kwargs);
     Py_XDECREF(result);
 
     PyObject* close_result = PyObject_CallMethod(file_obj, "close", nullptr);
@@ -1603,7 +1623,6 @@ inline bool json_dump(const PyObj& obj, const Str& filename, int indent = -1) {
     
     return true;
 }
-
 
 inline Str json_dumps(const PyObj& obj) {
     PyObject* json_module = PyImport_ImportModule("json"); 
@@ -1626,7 +1645,6 @@ inline Str json_dumps(const PyObj& obj) {
     Py_XDECREF(result); 
     return output;
 }
-
 
 inline PyObj json_load(const Str& filename) {
     PyObject* json_module = PyImport_ImportModule("json");
@@ -1661,7 +1679,6 @@ inline PyObj json_load(const Str& filename) {
 
     return result ? PyObj(result) : PyObj();
 }
-
 
 inline PyObj json_loads(const Str& json_string) {
     PyObject* json_module = PyImport_ImportModule("json"); 
