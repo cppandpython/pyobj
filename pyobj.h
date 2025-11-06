@@ -4,7 +4,7 @@
 // SURNAME: Khudash  
 // AGE: 17
 
-// DATE: 02.11.2025
+// DATE: 06.11.2025
 // APP: PYTHON_IN_CPP
 // TYPE: LIB
 // VERSION: LATEST
@@ -94,6 +94,7 @@ public:
     bool is_str() const { return obj && PyUnicode_Check(obj); }
     bool is_set() const { return obj && PySet_Check(obj); }
     bool is_sequence() const { return is_list() || is_tuple() || is_str(); }
+    bool is_callable() const { return obj && PyCallable_Check(obj); }
 
     // Item access methods
     PyObj get_item(const PyObj& key) const {
@@ -191,6 +192,35 @@ public:
         return success == 0;
     }
 
+    // ===== UNIVERSAL operator () for any type =====
+    template<typename... Args>
+    PyObj operator()(Args&&... args) const {
+        if (!obj || !PyCallable_Check(obj)) {
+            std::cerr << "Error: Object is not callable" << std::endl;
+            return PyObj();
+        }
+
+        // Converting arguments to Python objects
+        std::vector<PyObject*> py_args;
+        (py_args.push_back(convert_to_pyobject(std::forward<Args>(args))), ...);
+        
+        // Create a tuple of arguments
+        PyObject* tuple = PyTuple_New(py_args.size());
+        for (size_t i = 0; i < py_args.size(); i++) {
+            PyTuple_SetItem(tuple, i, py_args[i]);
+        }
+        
+        // Calling a function
+        PyObject* result = PyObject_CallObject(obj, tuple);
+        Py_DECREF(tuple);
+        
+        if (!result) {
+            PyErr_Print();
+            return PyObj();
+        }
+        return PyObj(result);
+    }
+
     // String representation
     std::string str() const {
         if (!obj) return "None";
@@ -210,6 +240,37 @@ public:
 
     // Pretty printing
     static void pretty_print(std::ostream& os, const PyObj& obj, int indent = 0);
+
+private:
+    // Helper methods for argument conversion
+    PyObject* convert_to_pyobject(const PyObj& arg) const {
+        Py_XINCREF(arg.get_obj());
+        return arg.get_obj();
+    }
+    
+    PyObject* convert_to_pyobject(int arg) const {
+        return PyLong_FromLong(arg);
+    }
+    
+    PyObject* convert_to_pyobject(long arg) const {
+        return PyLong_FromLong(arg);
+    }
+    
+    PyObject* convert_to_pyobject(double arg) const {
+        return PyFloat_FromDouble(arg);
+    }
+    
+    PyObject* convert_to_pyobject(bool arg) const {
+        return PyBool_FromLong(arg);
+    }
+    
+    PyObject* convert_to_pyobject(const std::string& arg) const {
+        return PyUnicode_FromString(arg.c_str());
+    }
+    
+    PyObject* convert_to_pyobject(const char* arg) const {
+        return PyUnicode_FromString(arg);
+    }
 };
 
 // ================== String Class ==================
@@ -1069,6 +1130,74 @@ public:
     }
 };
 
+// ================== Function Class ==================
+class Function : public PyObj {
+public:
+    Function() : PyObj() {}
+    Function(PyObject* o) : PyObj(o) {}
+    Function(const PyObj& o) : PyObj(o) {}
+
+    // ===== Universal calling method =====
+    PyObj call(const std::vector<PyObj>& args = {}, const Dict& kwargs = Dict()) const {
+        if (!obj || !PyCallable_Check(obj)) {
+            std::cerr << "Error: Object is not callable" << std::endl;
+            return PyObj();
+        }
+
+        PyObject* py_args = PyTuple_New(args.size());
+        for (size_t i = 0; i < args.size(); i++) {
+            Py_XINCREF(args[i].get_obj());
+            PyTuple_SetItem(py_args, i, args[i].get_obj());
+        }
+
+        PyObject* py_kwargs = kwargs.get_obj();
+        Py_XINCREF(py_kwargs);
+
+        PyObject* result = PyObject_Call(obj, py_args, py_kwargs);
+
+        Py_DECREF(py_args);
+        Py_DECREF(py_kwargs);
+
+        if (!result) {
+            PyErr_Print();
+            return PyObj();
+        }
+
+        return PyObj(result);
+    }
+
+    // ===== Universal Call via () =====
+    template<typename... Args>
+    PyObj operator()(Args&&... args) const {
+        std::vector<PyObj> vec;
+        Dict kwargs;
+
+        // If the last argument is Dict, consider it kwargs
+        if constexpr (sizeof...(args) > 0) {
+            auto tuple_args = std::tuple<Args...>(std::forward<Args>(args)...);
+            if constexpr (std::is_same_v<
+                std::remove_cv_t<std::remove_reference_t<
+                    decltype(std::get<sizeof...(args)-1>(tuple_args))
+                >>,
+                Dict
+            >) {
+                kwargs = std::get<sizeof...(args)-1>(tuple_args);
+                vec = make_args_tuple(tuple_args, std::make_index_sequence<sizeof...(args)-1>{});
+            } else {
+                vec = make_args_tuple(tuple_args, std::make_index_sequence<sizeof...(args)>{});
+            }
+        }
+
+        return call(vec, kwargs);
+    }
+
+    private:
+    template<typename Tuple, std::size_t... I>
+    std::vector<PyObj> make_args_tuple(const Tuple& t, std::index_sequence<I...>) const {
+        return { PyObj(std::get<I>(t))... };
+    }
+};
+
 // ================== Formatted String ==================
 template<typename T>
 std::pair<std::string, std::string> farg(const std::string& name, T&& value) {
@@ -1432,8 +1561,8 @@ inline void PyObj::pretty_print(std::ostream& os, const PyObj& obj, int indent) 
     detail::pretty_print(os, obj, indent); 
 }
 
-inline void print(const PyObj& obj = PyObj("None")) {
-    if (obj.str() != "None")
+inline void print(const PyObj& obj = Str("\\n")) {
+    if (obj.str() != "\\n")
         std::cout << obj << std::endl;
     else
         std::cout << std::endl;
